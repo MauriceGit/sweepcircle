@@ -8,8 +8,7 @@ import (
     "errors"
     "sort"
     "math"
-    //"github.com/MauriceGit/advsearch"
-    t "github.com/MauriceGit/tree23"
+    "github.com/MauriceGit/advsearch"
     //"time"
 )
 
@@ -49,8 +48,7 @@ type FrontElement struct {
 // The frontier is a list of indices into the Delaunay.vertices data structure!
 // The frontier should always be sorted according to their polar angle to allow optimized search in the list
 // when including new points!!!
-// type Frontier []FrontElement
-type Frontier *tree23.Tree23
+type Frontier []FrontElement
 
 var EmptyF = he.HEFace{}
 var EmptyE = he.HEEdge{}
@@ -68,42 +66,37 @@ func (dpl DelaunayPointList) String() string {
     return fmt.Sprintf("\nDelaunayPointList:\n    Origin: %v\n    Points: %v\n", dpl.Origin, dpl.Points)
 }
 
-//func (f *Frontier) insertAt(fp FrontElement, i int) {
-//    *f = append(*f, FrontElement{})
-//    copy((*f)[i+1:], (*f)[i:])
-//    (*f)[i] = fp
-//}
+func (f *Frontier) insertAt(fp FrontElement, i int) {
+    *f = append(*f, FrontElement{})
+    copy((*f)[i+1:], (*f)[i:])
+    (*f)[i] = fp
+}
 
 // Len is part of sort.Interface.
-//func (f *Frontier) Len() int {
-//    return len(*f)
-//}
-// Smaller is part of the Searchable interface
-//func (f *Frontier) Smaller(e interface{}, i int) bool {
-//    return e.(float64) < (*f)[i].PolarAngle
-//}
-// Match is part of the Searchable interface
-//func (f *Frontier) Match(e interface{}, i int) bool {
-//
-//    if i > 0 {
-//        return  (*f)[i].PolarAngle   > e.(float64) &&
-//                (*f)[i-1].PolarAngle < e.(float64)
-//    }
-//
-//    return (*f)[i].PolarAngle > e.(float64)
-//}
-//// Match is part of the SearchableInterpolation interface
-//func (f *Frontier) GetValue(i int) float64 {
-//    return float64((*f)[i].PolarAngle)
-//}
-
-// Equal is part of the Tree23 interface
-func (f FrontElement) Equal(f2 t.FrontElement) bool {
-    return math.Abs(f.PolarAngle - f2.PolarAngle) <= EPS
+func (f *Frontier) Len() int {
+    return len(*f)
 }
-// ExtractValue is part of the Tree23 interface
-func (f FrontElement) ExtractValue() float64 {
-    return f.PolarAngle
+// Smaller is part of the Searchable interface
+func (f *Frontier) Smaller(e interface{}, i int) bool {
+    return e.(float64) < (*f)[i].PolarAngle
+}
+// Match is part of the Searchable interface
+func (f *Frontier) Match(e interface{}, i int) bool {
+
+    if i > 0 {
+        return  (*f)[i].PolarAngle   > e.(float64) &&
+                (*f)[i-1].PolarAngle < e.(float64)
+    }
+
+    return (*f)[i].PolarAngle > e.(float64)
+}
+// Match is part of the SearchableInterpolation interface
+func (f *Frontier) GetValue(i int) float64 {
+    return float64((*f)[i].PolarAngle)
+}
+// Match is part of the SearchableInterpolation interface
+func (f *Frontier) ExtractValue(e interface{}) float64 {
+    return e.(float64)
 }
 
 // By is the type of a "less" function that defines the ordering of its Planet arguments.
@@ -167,16 +160,13 @@ func (v *Delaunay) pprint() {
     fmt.Printf("\n")
 }
 
-func (frontier Frontier) print(delaunay *Delaunay, title string) {
-
-    frontier.Pprint()
-
-    //fmt.Printf("%s\n\t", title)
-    //for _,f := range *frontier {
-    //    //fmt.Printf("(%d - %.1f), ", f.EdgeIndex, f.PolarAngle)
-    //    fmt.Printf("%d, ", delaunay.Edges[f.EdgeIndex].VOrigin)
-    //}
-    //fmt.Printf("\n")
+func (frontier *Frontier) print(delaunay *Delaunay, title string) {
+    fmt.Printf("%s\n\t", title)
+    for _,f := range *frontier {
+        //fmt.Printf("(%d - %.1f), ", f.EdgeIndex, f.PolarAngle)
+        fmt.Printf("%d, ", delaunay.Edges[f.EdgeIndex].VOrigin)
+    }
+    fmt.Printf("\n")
 }
 
 // Verifies that the Delaunay is not corrupted or has miscalculated edges/faces
@@ -389,34 +379,26 @@ func preparePointList(points *v.PointList) DelaunayPointList {
 
 func (delaunay *Delaunay)initializeTriangulation(pl *DelaunayPointList) Frontier {
 
-    //var frontier Frontier = make([]FrontElement, 3, len((*pl).Points))
-
-
-    frontier := t.New()
-
-    f0 := FrontElement{}
-    f1 := FrontElement{}
-    f2 := FrontElement{}
-
+    var frontier Frontier = make([]FrontElement, 3, len((*pl).Points))
     d := delaunay
 
     // The closest three points are (per definition) the triangle surrounding origin.
     if pl.Points[0].PolarAngle < pl.Points[1].PolarAngle {
         // 0 < 1
         delaunay.Vertices[0] = he.HEVertex{pl.Points[0].Point}
-        f0.PolarAngle = pl.Points[0].PolarAngle
+        frontier[0].PolarAngle = pl.Points[0].PolarAngle
         if pl.Points[2].PolarAngle < pl.Points[0].PolarAngle || pl.Points[2].PolarAngle > pl.Points[1].PolarAngle {
             // 2 < 0 < 1
             delaunay.Vertices[1] = he.HEVertex{pl.Points[1].Point}
             delaunay.Vertices[2] = he.HEVertex{pl.Points[2].Point}
-            f1.PolarAngle = pl.Points[1].PolarAngle
-            f2.PolarAngle = pl.Points[2].PolarAngle
+            frontier[1].PolarAngle = pl.Points[1].PolarAngle
+            frontier[2].PolarAngle = pl.Points[2].PolarAngle
         } else {
             // 0 < 2 < 1
             delaunay.Vertices[1] = he.HEVertex{pl.Points[2].Point}
             delaunay.Vertices[2] = he.HEVertex{pl.Points[1].Point}
-            f1.PolarAngle = pl.Points[2].PolarAngle
-            f2.PolarAngle = pl.Points[1].PolarAngle
+            frontier[1].PolarAngle = pl.Points[2].PolarAngle
+            frontier[2].PolarAngle = pl.Points[1].PolarAngle
         }
     } else {
         delaunay.Vertices[0] = he.HEVertex{pl.Points[2].Point}
