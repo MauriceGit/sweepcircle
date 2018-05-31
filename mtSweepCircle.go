@@ -8,7 +8,6 @@ import (
     "errors"
     "sort"
     "math"
-    //"github.com/MauriceGit/advsearch"
     t "github.com/MauriceGit/tree23"
     //"time"
 )
@@ -631,7 +630,7 @@ func createConsecutiveTrianglesRight(frontier *t.Tree23, delaunay *Delaunay, bas
     isRight := v.IsRight2D(basePos, v0, v1)
     angle   := v.Angle(v.Sub(basePos, v0), v.Sub(v1, v0))
 
-    if isRight && angle < 180 {
+    if isRight && angle < 45 {
 
         // v1
         // |\
@@ -680,7 +679,7 @@ func createConsecutiveTrianglesRight(frontier *t.Tree23, delaunay *Delaunay, bas
 // Similar to createConsecutiveTrianglesRight, this function checks to the right side, detects basins and
 // removes them! This function should be called after createConsecutiveTrianglesRight so we already have
 // the basic triangles in place before this optimization.
-//func (frontier Frontier) removeBasinRight(delaunay *Delaunay, leafNode Frontier) {
+//func removeBasinRight(frontier *t.tree23, delaunay *Delaunay, leafNode Frontier) *t.tree23 {
 //
 //    // Variable names are according to the paper!
 //    //vi := (*frontier)[fIndex].EdgeIndex
@@ -826,9 +825,9 @@ func createConsecutiveTrianglesLeft(frontier *t.Tree23, delaunay *Delaunay, base
     isLeft := v.IsLeft2D(basePos, v0, v1)
     angle   := v.Angle(v.Sub(basePos, v0), v.Sub(v1, v0))
 
-    if isLeft && angle < 180 {
+    if isLeft && angle < 45 {
 
-        fmt.Printf("isLeft!, angle: %.2f\n", angle)
+        //fmt.Printf("isLeft!, angle: %.2f\n", angle)
 
         eNew1 := delaunay.createEdge(v1Vertex, he.EmptyEdge, e1, e0, delaunay.Edges[e0].FFace, v.Edge{})
         eNew2 := delaunay.createEdge(baseVertex, eNew1, he.EmptyEdge, he.EmptyEdge, he.EmptyFace, v.Edge{})
@@ -1078,7 +1077,7 @@ func Triangulate(pointList v.PointList) Delaunay {
 
     dPointList := preparePointList(&pointList)
     //defer fmt.Printf("point to be inserted last: %v\n", dPointList.Points[52])
-    dPointList.Points = dPointList.Points[:10]
+    //dPointList.Points = dPointList.Points[:10]
 
     // Any planar triangulation: total degree == 3f + k = 2e
     // With k == points on convex hull of all points. Let k = p
