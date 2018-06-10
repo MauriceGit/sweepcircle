@@ -46,6 +46,12 @@ type FrontElement struct {
     Radius      float64
 }
 
+// Used for building a stack of triangle checks so we don't infinitely flip edges.
+type CheckTriangle struct {
+    e   he.EdgeIndex
+    v   v.Vector
+}
+
 // The frontier is a list of indices into the Delaunay.vertices data structure!
 // The frontier should always be sorted according to their polar angle to allow optimized search in the list
 // when including new points!!!
@@ -325,6 +331,10 @@ func (v *Delaunay)createVertex(pos v.Vector) he.VertexIndex {
 
 func calcPolarAngle(p v.Vector, origin v.Vector) float64 {
 
+    if v.Equal(p, origin) {
+        return 0.0
+    }
+
     diff  := v.Sub(p, origin)
     xAxis := v.Vector{1,0,0}
 
@@ -482,9 +492,14 @@ func (delaunay *Delaunay)initializeTriangulation(pl *DelaunayPointList) *t.Tree2
 
     frontier := t.New()
 
+    fmt.Printf("pos: %v, origin: %v\n", delaunay.Vertices[1].Pos, (*pl).Origin)
+
     frontier.Insert(f0)
+    fmt.Printf("Insert1: %v\n", f0)
     frontier.Insert(f1)
+    fmt.Printf("Insert1: %v\n", f1)
     frontier.Insert(f2)
+    fmt.Printf("Insert1: %v\n", f2)
 
     return frontier
 }
@@ -525,12 +540,10 @@ func triangleIsValid(a, b, c, d v.Vector) bool {
     g_matrixElements[1][3] = d.Y
     g_matrixElements[2][3] = d.X*d.X+d.Y*d.Y
 
-    return v.Fast4x4Determinant(&g_matrixElements) <= 0
+    return v.Fast4x4Determinant(&g_matrixElements) <= 0.0
 }
 
 func (delaunay *Delaunay) flipEdge(e he.EdgeIndex) {
-
-    //fmt.Println("flipping an edge.")
 
     e1  := delaunay.Edges[e].ENext
     e2  := delaunay.Edges[e1].ENext
@@ -576,10 +589,16 @@ func (delaunay *Delaunay) flipEdge(e he.EdgeIndex) {
 
 // Recursively flips edges until all triangles are correct delaunay triangles.
 // This should never affect the frontier, as only internal edges can be flipped.
-func (delaunay *Delaunay) legalizeTriangle(e he.EdgeIndex, v v.Vector) {
+func (delaunay *Delaunay) legalizeTriangle(t CheckTriangle, firstCheck CheckTriangle) {
+
+    // We might recursively itereate the same triangles. So if we arive at the very first triangle again,
+    // we exit the recursion! Things are fine.
+    if t.e == firstCheck.e && v.Equal(t.v, firstCheck.v) {
+        return
+    }
 
     // recursion ends at outer bounds.
-    e1 := delaunay.Edges[e].ENext
+    e1 := delaunay.Edges[t.e].ENext
     if e1 == he.EmptyEdge {
         return
     }
@@ -588,21 +607,20 @@ func (delaunay *Delaunay) legalizeTriangle(e he.EdgeIndex, v v.Vector) {
         return
     }
 
-    a := delaunay.Vertices[delaunay.Edges[e].VOrigin].Pos
+    a := delaunay.Vertices[delaunay.Edges[t.e].VOrigin].Pos
     b := delaunay.Vertices[delaunay.Edges[e1].VOrigin].Pos
     c := delaunay.Vertices[delaunay.Edges[e2].VOrigin].Pos
 
-    if !triangleIsValid(a,b,c,v) {
+    if !triangleIsValid(a,b,c,t.v) {
 
         // Flip edge here
-        delaunay.flipEdge(e)
+        delaunay.flipEdge(t.e)
 
         // Recursively check neighboring triangles
-        // TODO: Do we really need 4 recursive calls or do 2 suffice?
-        delaunay.legalizeTriangle(delaunay.Edges[e1].ETwin, v)
-        delaunay.legalizeTriangle(delaunay.Edges[e2].ETwin, v)
-        delaunay.legalizeTriangle(delaunay.Edges[delaunay.Edges[e].EPrev].ETwin, c)
-        delaunay.legalizeTriangle(delaunay.Edges[delaunay.Edges[e1].EPrev].ETwin, c)
+        delaunay.legalizeTriangle(CheckTriangle{delaunay.Edges[e1].ETwin, t.v}, firstCheck)
+        delaunay.legalizeTriangle(CheckTriangle{delaunay.Edges[e2].ETwin, t.v}, firstCheck)
+        delaunay.legalizeTriangle(CheckTriangle{delaunay.Edges[delaunay.Edges[t.e].EPrev].ETwin, c}, firstCheck)
+        delaunay.legalizeTriangle(CheckTriangle{delaunay.Edges[delaunay.Edges[e1].EPrev].ETwin, c}, firstCheck)
 
         return
     }
@@ -613,7 +631,7 @@ func (delaunay *Delaunay) legalizeTriangle(e he.EdgeIndex, v v.Vector) {
 // that match the pi/2 angle criteria.
 // TODO: Pass vector position directly without going through the frontier and delaunay every time.
 // Returns, how many consecutive triangles were created to the right.
-func createConsecutiveTrianglesRight(frontier *t.Tree23, delaunay *Delaunay, baseVertex he.VertexIndex, leafNode t.TreeNodeIndex) {
+func createConsecutiveTrianglesRight(frontier *t.Tree23, delaunay *Delaunay, baseVertex he.VertexIndex, leafNode t.TreeNodeIndex, maxFillAngle float64) {
 
     nextFrontier,_ := frontier.Next(leafNode)
 
@@ -631,7 +649,7 @@ func createConsecutiveTrianglesRight(frontier *t.Tree23, delaunay *Delaunay, bas
     isRight := v.IsRight2D(basePos, v0, v1)
     angle   := v.Angle(v.Sub(basePos, v0), v.Sub(v1, v0))
 
-    if isRight && angle < 180 {
+    if isRight && angle < maxFillAngle {
 
         // v1
         // |\
@@ -661,16 +679,17 @@ func createConsecutiveTrianglesRight(frontier *t.Tree23, delaunay *Delaunay, bas
 
         frontier.ChangeValue(nextFrontier, FrontElement{eNew2, nextFrontierValue.PolarAngle, nextFrontierValue.Radius})
 
+        //fmt.Printf("%v --> %v\n", leafNode, leafNodeValue)
         frontier.Delete(leafNodeValue)
 
         // Validate towards the previous triangle created consecutively
         d := delaunay.Vertices[delaunay.Edges[delaunay.Edges[delaunay.Edges[e0].ETwin].EPrev].VOrigin].Pos
-        delaunay.legalizeTriangle(e0, d)
+        delaunay.legalizeTriangle(CheckTriangle{e0, d}, CheckTriangle{e0, d})
         // Validate towards inside the triangulation
         d = delaunay.Vertices[delaunay.Edges[delaunay.Edges[delaunay.Edges[e1].ETwin].EPrev].VOrigin].Pos
-        delaunay.legalizeTriangle(e1, d)
+        delaunay.legalizeTriangle(CheckTriangle{e1, d}, CheckTriangle{e1, d})
 
-        createConsecutiveTrianglesRight(frontier, delaunay, baseVertex, nextFrontier)
+        createConsecutiveTrianglesRight(frontier, delaunay, baseVertex, nextFrontier, maxFillAngle)
 
     }
 
@@ -679,128 +698,145 @@ func createConsecutiveTrianglesRight(frontier *t.Tree23, delaunay *Delaunay, bas
 // Similar to createConsecutiveTrianglesRight, this function checks to the right side, detects basins and
 // removes them! This function should be called after createConsecutiveTrianglesRight so we already have
 // the basic triangles in place before this optimization.
-//func removeBasinRight(frontier *t.tree23, delaunay *Delaunay, leafNode Frontier) *t.tree23 {
-//
-//    // Variable names are according to the paper!
-//    //vi := (*frontier)[fIndex].EdgeIndex
-//
-//    fVRPlus := fIndex+1
-//    if fVRPlus >= len(*frontier) {
-//        fVRPlus = fVRPlus % len(*frontier)
-//    }
-//
-//    vRPlus := (*frontier)[fVRPlus].EdgeIndex
-//    vRPlusVertex := delaunay.Edges[vRPlus].VOrigin
-//
-//    r2 := (*frontier)[fVRPlus].Radius
-//    dR := (*frontier)[fIndex].Radius - r2
-//    d0 := (*frontier)[fVRPlus].PolarAngle - (*frontier)[fIndex].PolarAngle
-//
-//    if (*frontier)[fVRPlus].PolarAngle < (*frontier)[fIndex].PolarAngle {
-//        d0 = (*frontier)[fVRPlus].PolarAngle+360 - (*frontier)[fIndex].PolarAngle
-//    }
-//
-//    // basin detected!
-//    if dR / (r2*d0) > 2 {
-//        //fmt.Printf("Basin to the right detected!\n")
-//
-//        foundMinimum := false
-//        fMin := fVRPlus
-//        // Find local minimum radius
-//        for {
-//            fNext := fMin+1
-//            if fNext >= len(*frontier) {
-//                fNext = 0
-//            }
-//            if (*frontier)[fNext].Radius < (*frontier)[fMin].Radius {
-//                fMin = fNext
-//                foundMinimum = true
-//            } else {
-//                break
-//            }
-//        }
-//        // No vertex after fVRPlus has a smaller radius than fVRPlus itself.
-//        if !foundMinimum {
-//            return
-//        }
-//
-//        fCurrent := fMin
-//        // Find local maximum on the other side of the basin depending on
-//        // positive triangle area or vertex position (which side!)
-//        for {
-//            fLast := fCurrent
-//            fCurrent = fCurrent+1
-//            if fCurrent >= len(*frontier) {
-//                fCurrent = 0
-//            }
-//
-//            v0 := delaunay.Vertices[vRPlusVertex].Pos
-//            v1 := delaunay.Vertices[delaunay.Edges[(*frontier)[fLast].EdgeIndex].VOrigin].Pos
-//            vNext := delaunay.Vertices[delaunay.Edges[(*frontier)[fCurrent].EdgeIndex].VOrigin].Pos
-//
-//            if v.IsRight2D(v0, v1, vNext) {
-//                //fmt.Printf("Basin filling triangle created.\n")
-//
-//                // re-set fLast to the newly created outer edge!
-//                // don't forget to remove the edge(s) from the frontier!
-//
-//
-//                lastEdge    := (*frontier)[fLast].EdgeIndex
-//                currentEdge := (*frontier)[fCurrent].EdgeIndex
-//
-//                eNew1 := delaunay.createEdge(vRPlusVertex, he.EmptyEdge, lastEdge, currentEdge, delaunay.Edges[lastEdge].FFace, v.Edge{})
-//                eNew2 := delaunay.createEdge(delaunay.Edges[currentEdge].VOrigin, eNew1, he.EmptyEdge, he.EmptyEdge, he.EmptyFace, v.Edge{})
-//
-//                face  := delaunay.createFace(v.Vector{}, eNew2)
-//                delaunay.Edges[eNew1].ETwin = eNew2
-//                delaunay.Edges[eNew2].FFace = face
-//
-//                delaunay.Edges[lastEdge].ENext = eNew1
-//                delaunay.Edges[currentEdge].EPrev = eNew1
-//
-//                delaunay.Edges[lastEdge].EPrev = currentEdge
-//                delaunay.Edges[currentEdge].ENext = lastEdge
-//
-//                (*frontier)[fCurrent].EdgeIndex = eNew2
-//                (*frontier) = append((*frontier)[:fLast], (*frontier)[fLast+1:]...)
-//                //(*frontier) = append((*frontier)[:fLast], (*frontier)[fCurrent:]...)
-//
-//
-//                // It should stay the same. But in some circumstances, we delete one element underneath it. So the
-//                // list gets shorter and the frontier position shifts.
-//                newFCurrent := fCurrent
-//                if fLast < fCurrent {
-//                    newFCurrent -= 1
-//                    if newFCurrent < 0 {
-//                        newFCurrent = newFCurrent+len(*frontier)
-//                    }
-//                }
-//
-//                fCurrent = newFCurrent
-//
-//                d := delaunay.Vertices[delaunay.Edges[delaunay.Edges[delaunay.Edges[lastEdge].ETwin].EPrev].VOrigin].Pos
-//                delaunay.legalizeTriangle(lastEdge, d)
-//                d = delaunay.Vertices[delaunay.Edges[delaunay.Edges[delaunay.Edges[currentEdge].ETwin].EPrev].VOrigin].Pos
-//                delaunay.legalizeTriangle(currentEdge, d)
-//
-//            } else {
-//                break
-//            }
-//
-//        }
-//
-//
-//
-//
-//    }
-//
-//
-//}
+func removeBasinRight(frontier *t.Tree23, delaunay *Delaunay, leafNode t.TreeNodeIndex) {
+
+    // Variable names are according to the paper!
+    //vi := (*frontier)[fIndex].EdgeIndex
+
+    //fVRPlus := fIndex+1
+    //if fVRPlus >= len(*frontier) {
+    //    fVRPlus = fVRPlus % len(*frontier)
+    //}
+
+    fVRPlus,_ := frontier.Next(leafNode)
+
+    leafNodeValue := frontier.GetValue(leafNode).(FrontElement)
+    vRPlus := frontier.GetValue(fVRPlus).(FrontElement)
+
+
+    //vRPlus := (*frontier)[fVRPlus].EdgeIndex
+    vRPlusVertex := delaunay.Edges[vRPlus.EdgeIndex].VOrigin
+
+    r2 := vRPlus.Radius
+    dR := leafNodeValue.Radius - r2
+    d0 := vRPlus.PolarAngle - leafNodeValue.PolarAngle
+
+    if vRPlus.PolarAngle < leafNodeValue.PolarAngle {
+        d0 = vRPlus.PolarAngle+360 - leafNodeValue.PolarAngle
+    }
+
+    // basin detected!
+    if dR / (r2*d0) > 2 {
+        //fmt.Printf("Basin to the right detected!\n")
+
+        foundMinimum := false
+        fMin := fVRPlus
+        vMin,_ := frontier.GetValue(fMin).(FrontElement)
+        // Find local minimum radius
+        for {
+            fNext,_ := frontier.Next(fMin)
+            vNext := frontier.GetValue(fNext).(FrontElement)
+            //fNext := fMin+1
+            //if fNext >= len(*frontier) {
+            //    fNext = 0
+            //}
+            if vNext.Radius < vMin.Radius {
+                fMin = fNext
+                foundMinimum = true
+            } else {
+                break
+            }
+        }
+        // No vertex after fVRPlus has a smaller radius than fVRPlus itself.
+        if !foundMinimum {
+            return
+        }
+
+        fCurrent := fMin
+        // Find local maximum on the other side of the basin depending on
+        // positive triangle area or vertex position (which side!)
+        for {
+            fLast := fCurrent
+            //fCurrent = fCurrent+1
+            //if fCurrent >= len(*frontier) {
+            //    fCurrent = 0
+            //}
+            fCurrent,_ = frontier.Next(fCurrent)
+
+            vLast := frontier.GetValue(fLast).(FrontElement)
+            vCurrent := frontier.GetValue(fCurrent).(FrontElement)
+
+
+            v0 := delaunay.Vertices[vRPlusVertex].Pos
+            v1 := delaunay.Vertices[delaunay.Edges[vLast.EdgeIndex].VOrigin].Pos
+            vNext := delaunay.Vertices[delaunay.Edges[vCurrent.EdgeIndex].VOrigin].Pos
+
+            if v.IsRight2D(v0, v1, vNext) {
+                //fmt.Printf("Basin filling triangle created.\n")
+
+                // re-set fLast to the newly created outer edge!
+                // don't forget to remove the edge(s) from the frontier!
+
+
+                lastEdge    := vLast.EdgeIndex
+                currentEdge := vCurrent.EdgeIndex
+
+                eNew1 := delaunay.createEdge(vRPlusVertex, he.EmptyEdge, lastEdge, currentEdge, delaunay.Edges[lastEdge].FFace, v.Edge{})
+                eNew2 := delaunay.createEdge(delaunay.Edges[currentEdge].VOrigin, eNew1, he.EmptyEdge, he.EmptyEdge, he.EmptyFace, v.Edge{})
+
+                face  := delaunay.createFace(v.Vector{}, eNew2)
+                delaunay.Edges[eNew1].ETwin = eNew2
+                delaunay.Edges[eNew2].FFace = face
+
+                delaunay.Edges[lastEdge].ENext = eNew1
+                delaunay.Edges[currentEdge].EPrev = eNew1
+
+                delaunay.Edges[lastEdge].EPrev = currentEdge
+                delaunay.Edges[currentEdge].ENext = lastEdge
+
+                //(*frontier)[fCurrent].EdgeIndex = eNew2
+                frontier.ChangeValue(fCurrent, FrontElement{eNew2, vCurrent.PolarAngle, vCurrent.Radius})
+                frontier.Delete(vLast)
+
+                //(*frontier) = append((*frontier)[:fLast], (*frontier)[fLast+1:]...)
+                //(*frontier) = append((*frontier)[:fLast], (*frontier)[fCurrent:]...)
+
+
+                // It should stay the same. But in some circumstances, we delete one element underneath it. So the
+                // list gets shorter and the frontier position shifts.
+                //newFCurrent := fCurrent
+                //if fLast < fCurrent {
+                //    newFCurrent -= 1
+                //    if newFCurrent < 0 {
+                //        newFCurrent = newFCurrent+len(*frontier)
+                //    }
+                //}
+
+                //fCurrent = newFCurrent
+
+                d := delaunay.Vertices[delaunay.Edges[delaunay.Edges[delaunay.Edges[lastEdge].ETwin].EPrev].VOrigin].Pos
+                delaunay.legalizeTriangle(CheckTriangle{lastEdge, d}, CheckTriangle{lastEdge, d})
+                d = delaunay.Vertices[delaunay.Edges[delaunay.Edges[delaunay.Edges[currentEdge].ETwin].EPrev].VOrigin].Pos
+                delaunay.legalizeTriangle(CheckTriangle{currentEdge, d}, CheckTriangle{currentEdge, d})
+
+            } else {
+                break
+            }
+
+        }
+
+
+
+
+    }
+
+
+}
 
 // Recursive function that walks right as long as there is a triangle to be created (to fill holes)
 // that match the pi/2 angle criteria.
 // TODO: Pass vector position directly without going through the frontier and delaunay every time.
-func createConsecutiveTrianglesLeft(frontier *t.Tree23, delaunay *Delaunay, baseVertex he.VertexIndex, leafNode t.TreeNodeIndex) {
+func createConsecutiveTrianglesLeft(frontier *t.Tree23, delaunay *Delaunay, baseVertex he.VertexIndex, leafNode t.TreeNodeIndex, maxFillAngle float64) {
 
     leafNodeValue := frontier.GetValue(leafNode).(FrontElement)
 
@@ -816,16 +852,10 @@ func createConsecutiveTrianglesLeft(frontier *t.Tree23, delaunay *Delaunay, base
     v1Vertex := delaunay.Edges[delaunay.Edges[e1].ETwin].VOrigin
     v1 := delaunay.Vertices[v1Vertex].Pos
 
-    //fmt.Printf("baseVertex: %d\n", baseVertex)
-    //fmt.Printf("v0Vertex: %v\nv1Vertex: %v\n", delaunay.Edges[e1].VOrigin, v1Vertex)
-    //fmt.Printf("v0: %v\nv1: %v\n", v0, v1)
-
     isLeft := v.IsLeft2D(basePos, v0, v1)
     angle   := v.Angle(v.Sub(basePos, v0), v.Sub(v1, v0))
 
-    if isLeft && angle < 180 {
-
-        //fmt.Printf("isLeft!, angle: %.2f\n", angle)
+    if isLeft && angle < maxFillAngle {
 
         eNew1 := delaunay.createEdge(v1Vertex, he.EmptyEdge, e1, e0, delaunay.Edges[e0].FFace, v.Edge{})
         eNew2 := delaunay.createEdge(baseVertex, eNew1, he.EmptyEdge, he.EmptyEdge, he.EmptyFace, v.Edge{})
@@ -846,138 +876,156 @@ func createConsecutiveTrianglesLeft(frontier *t.Tree23, delaunay *Delaunay, base
 
         // Validate towards the previous triangle created consecutively
         d := delaunay.Vertices[delaunay.Edges[delaunay.Edges[delaunay.Edges[e0].ETwin].EPrev].VOrigin].Pos
-        delaunay.legalizeTriangle(e0, d)
+        delaunay.legalizeTriangle(CheckTriangle{e0, d}, CheckTriangle{e0, d})
         // Validate towards inside the triangulation
         d = delaunay.Vertices[delaunay.Edges[delaunay.Edges[delaunay.Edges[e1].ETwin].EPrev].VOrigin].Pos
-        delaunay.legalizeTriangle(e1, d)
+        delaunay.legalizeTriangle(CheckTriangle{e1, d}, CheckTriangle{e1, d})
 
-        createConsecutiveTrianglesLeft(frontier, delaunay, baseVertex, leafNode)
+        createConsecutiveTrianglesLeft(frontier, delaunay, baseVertex, leafNode, maxFillAngle)
     }
 }
 
 // Similar to createConsecutiveTrianglesRight, this function checks to the right side, detects basins and
 // removes them! This function should be called after createConsecutiveTrianglesRight so we already have
 // the basic triangles in place before this optimization.
-//func (frontier *Frontier) removeBasinLeft(delaunay *Delaunay, leafNode Frontier) {
-//
-//    // Variable names are according to the paper!
-//    //vi := (*frontier)[fIndex].EdgeIndex
-//
-//    fVRPlus := fIndex-1
-//    if fVRPlus < 0 {
-//        fVRPlus = fVRPlus+len(*frontier)
-//    }
-//
-//    vRPlus := (*frontier)[fVRPlus].EdgeIndex
-//    vRPlusVertex := delaunay.Edges[vRPlus].VOrigin
-//
-//    r2 := (*frontier)[fVRPlus].Radius
-//    dR := (*frontier)[fIndex].Radius - r2
-//    d0 := (*frontier)[fIndex].PolarAngle - (*frontier)[fVRPlus].PolarAngle
-//
-//    if (*frontier)[fVRPlus].PolarAngle > (*frontier)[fIndex].PolarAngle {
-//        d0 = (*frontier)[fIndex].PolarAngle+360 - (*frontier)[fVRPlus].PolarAngle
-//    }
-//
-//    // basin detected!
-//    if dR / (r2*d0) > 2 {
-//        //fmt.Printf("Basin to the left detected!\n")
-//
-//        foundMinimum := false
-//        fMin := fVRPlus
-//        // Find local minimum radius
-//        for {
-//            fNext := fMin-1
-//            if fNext < 0 {
-//                fNext = len(*frontier)-1
-//            }
-//            if (*frontier)[fNext].Radius < (*frontier)[fMin].Radius {
-//                fMin = fNext
-//                foundMinimum = true
-//            } else {
-//                break
-//            }
-//        }
-//        // No vertex after fVRPlus has a smaller radius than fVRPlus itself.
-//        if !foundMinimum {
-//            return
-//        }
-//
-//        fCurrent := fMin
-//        // Find local maximum on the other side of the basin depending on
-//        // positive triangle area or vertex position (which side!)
-//        for {
-//            fLast := fCurrent
-//            fCurrent = fCurrent-1
-//            if fCurrent < 0 {
-//                fCurrent = len(*frontier)-1
-//            }
-//
-//            v0 := delaunay.Vertices[vRPlusVertex].Pos
-//            v1 := delaunay.Vertices[delaunay.Edges[(*frontier)[fLast].EdgeIndex].VOrigin].Pos
-//            vCurrent := delaunay.Edges[(*frontier)[fCurrent].EdgeIndex].VOrigin
-//
-//            if v.IsLeft2D(v0, v1, delaunay.Vertices[vCurrent].Pos) {
-//                //fmt.Printf("Basin filling triangle created.\n")
-//
-//                lastEdge    := (*frontier)[fLast].EdgeIndex
-//                //currentEdge := (*frontier)[fCurrent].EdgeIndex
-//
-//
-//
-//                eNew1 := delaunay.createEdge(vCurrent, he.EmptyEdge, lastEdge, vRPlus, delaunay.Edges[lastEdge].FFace, v.Edge{})
-//                eNew2 := delaunay.createEdge(vRPlusVertex, eNew1, he.EmptyEdge, he.EmptyEdge, he.EmptyFace, v.Edge{})
-//
-//                face  := delaunay.createFace(v.Vector{}, eNew2)
-//                delaunay.Edges[eNew1].ETwin = eNew2
-//                delaunay.Edges[eNew2].FFace = face
-//
-//                delaunay.Edges[lastEdge].ENext = eNew1
-//                delaunay.Edges[vRPlus].EPrev = eNew1
-//
-//                delaunay.Edges[lastEdge].EPrev = vRPlus
-//                delaunay.Edges[vRPlus].ENext = lastEdge
-//
-//                (*frontier)[fVRPlus].EdgeIndex = eNew2
-//                //(*frontier) = append((*frontier)[:fLast], (*frontier)[fVRPlus:]...)
-//                frontier.removeFrontierAt(fLast)
-//
-//                // It should stay the same. But in some circumstances, we delete one element underneath it. So the
-//                // list gets shorter and the frontier position shifts.
-//                newFCurrent := fCurrent
-//                if fLast < fCurrent {
-//                    newFCurrent -= 1
-//                    if newFCurrent < 0 {
-//                        newFCurrent = newFCurrent+len(*frontier)
-//                    }
-//                }
-//
-//                fCurrent = newFCurrent
-//
-//                d := delaunay.Vertices[delaunay.Edges[delaunay.Edges[delaunay.Edges[lastEdge].ETwin].EPrev].VOrigin].Pos
-//                delaunay.legalizeTriangle(lastEdge, d)
-//                d = delaunay.Vertices[delaunay.Edges[delaunay.Edges[delaunay.Edges[vRPlus].ETwin].EPrev].VOrigin].Pos
-//                delaunay.legalizeTriangle(vRPlus, d)
-//
-//            } else {
-//                break
-//            }
-//
-//        }
-//
-//
-//
-//
-//    }
-//
-//
-//}
+func removeBasinLeft(frontier *t.Tree23, delaunay *Delaunay, leafNode t.TreeNodeIndex) {
 
+    // Variable names are according to the paper!
+    //vi := (*frontier)[fIndex].EdgeIndex
+
+    //fVRPlus := fIndex-1
+    //if fVRPlus < 0 {
+    //    fVRPlus = fVRPlus+len(*frontier)
+    //}
+
+    fVRPlus,_ := frontier.Previous(leafNode)
+
+    leafNodeValue := frontier.GetValue(leafNode).(FrontElement)
+    vRPlus := frontier.GetValue(fVRPlus).(FrontElement)
+    vRPlusVertex := delaunay.Edges[vRPlus.EdgeIndex].VOrigin
+
+
+
+
+    //vRPlus := (*frontier)[fVRPlus].EdgeIndex
+    //vRPlusVertex := delaunay.Edges[vRPlus].VOrigin
+
+    r2 := vRPlus.Radius
+    dR := leafNodeValue.Radius - r2
+    d0 := leafNodeValue.PolarAngle - vRPlus.PolarAngle
+
+    if vRPlus.PolarAngle > leafNodeValue.PolarAngle {
+        d0 = leafNodeValue.PolarAngle+360 - vRPlus.PolarAngle
+    }
+
+    // basin detected!
+    if dR / (r2*d0) > 2 {
+        //fmt.Printf("Basin to the left detected!\n")
+
+        foundMinimum := false
+        fMin := fVRPlus
+        vMin := frontier.GetValue(fMin).(FrontElement)
+        // Find local minimum radius
+        for {
+
+            fNext,_ := frontier.Previous(fMin)
+            vNext := frontier.GetValue(fNext).(FrontElement)
+
+            //fNext := fMin-1
+            //if fNext < 0 {
+            //    fNext = len(*frontier)-1
+            //}
+            if vNext.Radius < vMin.Radius {
+                fMin = fNext
+                foundMinimum = true
+            } else {
+                break
+            }
+        }
+        // No vertex after fVRPlus has a smaller radius than fVRPlus itself.
+        if !foundMinimum {
+            return
+        }
+
+        fCurrent := fMin
+        // Find local maximum on the other side of the basin depending on
+        // positive triangle area or vertex position (which side!)
+        for {
+            fLast := fCurrent
+            vLast := frontier.GetValue(fLast).(FrontElement)
+            //fCurrent = fCurrent-1
+
+            fCurrent,_ = frontier.Previous(fCurrent)
+            vCurrentE := frontier.GetValue(fCurrent).(FrontElement)
+
+            //if fCurrent < 0 {
+            //    fCurrent = len(*frontier)-1
+            //}
+
+            v0 := delaunay.Vertices[vRPlusVertex].Pos
+            v1 := delaunay.Vertices[delaunay.Edges[vLast.EdgeIndex].VOrigin].Pos
+            vCurrent := delaunay.Edges[vCurrentE.EdgeIndex].VOrigin
+
+            if v.IsLeft2D(v0, v1, delaunay.Vertices[vCurrent].Pos) {
+                //fmt.Printf("Basin filling triangle created.\n")
+
+                lastEdge    := vLast.EdgeIndex
+                //currentEdge := (*frontier)[fCurrent].EdgeIndex
+
+
+
+                eNew1 := delaunay.createEdge(vCurrent, he.EmptyEdge, lastEdge, vRPlus.EdgeIndex, delaunay.Edges[lastEdge].FFace, v.Edge{})
+                eNew2 := delaunay.createEdge(vRPlusVertex, eNew1, he.EmptyEdge, he.EmptyEdge, he.EmptyFace, v.Edge{})
+
+                face  := delaunay.createFace(v.Vector{}, eNew2)
+                delaunay.Edges[eNew1].ETwin = eNew2
+                delaunay.Edges[eNew2].FFace = face
+
+                delaunay.Edges[lastEdge].ENext = eNew1
+                delaunay.Edges[vRPlus.EdgeIndex].EPrev = eNew1
+
+                delaunay.Edges[lastEdge].EPrev = vRPlus.EdgeIndex
+                delaunay.Edges[vRPlus.EdgeIndex].ENext = lastEdge
+
+                //(*frontier)[fVRPlus].EdgeIndex = eNew2
+                //(*frontier) = append((*frontier)[:fLast], (*frontier)[fVRPlus:]...)
+                //frontier.removeFrontierAt(fLast)
+
+                frontier.ChangeValue(fVRPlus, FrontElement{eNew2, vRPlus.PolarAngle, vRPlus.Radius})
+                frontier.Delete(vLast)
+
+                // It should stay the same. But in some circumstances, we delete one element underneath it. So the
+                // list gets shorter and the frontier position shifts.
+                //newFCurrent := fCurrent
+                //if fLast < fCurrent {
+                //    newFCurrent -= 1
+                //    if newFCurrent < 0 {
+                //        newFCurrent = newFCurrent+len(*frontier)
+                //    }
+                //}
+                //
+                //fCurrent = newFCurrent
+
+                d := delaunay.Vertices[delaunay.Edges[delaunay.Edges[delaunay.Edges[lastEdge].ETwin].EPrev].VOrigin].Pos
+                delaunay.legalizeTriangle(CheckTriangle{lastEdge, d}, CheckTriangle{lastEdge, d})
+                d = delaunay.Vertices[delaunay.Edges[delaunay.Edges[delaunay.Edges[vRPlus.EdgeIndex].ETwin].EPrev].VOrigin].Pos
+                delaunay.legalizeTriangle(CheckTriangle{vRPlus.EdgeIndex, d}, CheckTriangle{vRPlus.EdgeIndex, d})
+
+            } else {
+                break
+            }
+
+        }
+
+
+
+
+    }
+
+
+}
 
 func extendByPoint(frontier *t.Tree23, p DelaunayPoint, delaunay *Delaunay, center v.Vector) {
-
-
-    //frontier.print("extendByPoint frontier: ")
 
     frontierItem, err := frontier.FindFirstLargerLeaf(p.PolarAngle)
     // In this case, p.PolarAngle is after the very last node
@@ -1026,22 +1074,20 @@ func extendByPoint(frontier *t.Tree23, p DelaunayPoint, delaunay *Delaunay, cent
 
 
     frontier.ChangeValue(frontierItem, FrontElement{ej2, frontierItemValue.PolarAngle, frontierItemValue.Radius})
-
+    fmt.Printf("Insert0: %v\n", FrontElement{ei2, p.PolarAngle, p.Distance})
     frontier.Insert(FrontElement{ei2, p.PolarAngle, p.Distance})
 
+    maxFillAngle := 125.0
 
     // There must exist a triangle behind the previous frontier edge. So this should be save.
     d := delaunay.Vertices[delaunay.Edges[delaunay.Edges[delaunay.Edges[existingE].ETwin].EPrev].VOrigin].Pos
-    delaunay.legalizeTriangle(existingE, d)
+    delaunay.legalizeTriangle(CheckTriangle{existingE, d}, CheckTriangle{existingE, d})
 
 
     previousLeaf,err := frontier.Previous(frontierItem)
 
-
-    //nextLeaf,_ := frontierItem.Next()
-    //nextNextLeaf,_ := nextLeaf.Next()
-    createConsecutiveTrianglesRight(frontier, delaunay, vi, frontierItem)
-    //frontier.removeBasinRight(delaunay, frontierItem)
+    createConsecutiveTrianglesRight(frontier, delaunay, vi, frontierItem, maxFillAngle)
+    //removeBasinRight(frontier, delaunay, previousLeaf)
 
 
 
@@ -1059,9 +1105,8 @@ func extendByPoint(frontier *t.Tree23, p DelaunayPoint, delaunay *Delaunay, cent
     // |/                   // createConsecutiveTrianglesLeft will create triangles on this side!
     // x
 
-
-    createConsecutiveTrianglesLeft(frontier, delaunay, vi, previousLeaf)
-    //frontier.removeBasinLeft(delaunay, newF1)
+    createConsecutiveTrianglesLeft(frontier, delaunay, vi, previousLeaf, maxFillAngle)
+    //removeBasinLeft(frontier, delaunay, previousLeaf)
 
 }
 
@@ -1077,7 +1122,7 @@ func Triangulate(pointList v.PointList) Delaunay {
 
     dPointList := preparePointList(&pointList)
     //defer fmt.Printf("point to be inserted last: %v\n", dPointList.Points[52])
-    //dPointList.Points = dPointList.Points[:10]
+    //dPointList.Points = dPointList.Points[:95]
 
     // Any planar triangulation: total degree == 3f + k = 2e
     // With k == points on convex hull of all points. Let k = p
@@ -1096,9 +1141,6 @@ func Triangulate(pointList v.PointList) Delaunay {
     }
 
     frontier := delaunay.initializeTriangulation(&dPointList)
-
-
-    //frontier.rearrangeFrontier()
 
     delaunay.triangulatePoints(&dPointList, frontier)
 
