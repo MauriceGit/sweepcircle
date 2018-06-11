@@ -492,14 +492,9 @@ func (delaunay *Delaunay)initializeTriangulation(pl *DelaunayPointList) *t.Tree2
 
     frontier := t.New()
 
-    fmt.Printf("pos: %v, origin: %v\n", delaunay.Vertices[1].Pos, (*pl).Origin)
-
     frontier.Insert(f0)
-    fmt.Printf("Insert1: %v\n", f0)
     frontier.Insert(f1)
-    fmt.Printf("Insert1: %v\n", f1)
     frontier.Insert(f2)
-    fmt.Printf("Insert1: %v\n", f2)
 
     return frontier
 }
@@ -540,7 +535,7 @@ func triangleIsValid(a, b, c, d v.Vector) bool {
     g_matrixElements[1][3] = d.Y
     g_matrixElements[2][3] = d.X*d.X+d.Y*d.Y
 
-    return v.Fast4x4Determinant(&g_matrixElements) <= 0.0
+    return v.Fast4x4Determinant(&g_matrixElements) <= 0.001
 }
 
 func (delaunay *Delaunay) flipEdge(e he.EdgeIndex) {
@@ -589,11 +584,11 @@ func (delaunay *Delaunay) flipEdge(e he.EdgeIndex) {
 
 // Recursively flips edges until all triangles are correct delaunay triangles.
 // This should never affect the frontier, as only internal edges can be flipped.
-func (delaunay *Delaunay) legalizeTriangle(t CheckTriangle, firstCheck CheckTriangle) {
+func (delaunay *Delaunay) legalizeTriangle(t CheckTriangle, firstCheck CheckTriangle, firstTime bool) {
 
     // We might recursively itereate the same triangles. So if we arive at the very first triangle again,
     // we exit the recursion! Things are fine.
-    if t.e == firstCheck.e && v.Equal(t.v, firstCheck.v) {
+    if t.e == firstCheck.e && v.Equal(t.v, firstCheck.v) && !firstTime {
         return
     }
 
@@ -617,10 +612,10 @@ func (delaunay *Delaunay) legalizeTriangle(t CheckTriangle, firstCheck CheckTria
         delaunay.flipEdge(t.e)
 
         // Recursively check neighboring triangles
-        delaunay.legalizeTriangle(CheckTriangle{delaunay.Edges[e1].ETwin, t.v}, firstCheck)
-        delaunay.legalizeTriangle(CheckTriangle{delaunay.Edges[e2].ETwin, t.v}, firstCheck)
-        delaunay.legalizeTriangle(CheckTriangle{delaunay.Edges[delaunay.Edges[t.e].EPrev].ETwin, c}, firstCheck)
-        delaunay.legalizeTriangle(CheckTriangle{delaunay.Edges[delaunay.Edges[e1].EPrev].ETwin, c}, firstCheck)
+        delaunay.legalizeTriangle(CheckTriangle{delaunay.Edges[e1].ETwin, t.v}, firstCheck, false)
+        delaunay.legalizeTriangle(CheckTriangle{delaunay.Edges[e2].ETwin, t.v}, firstCheck, false)
+        delaunay.legalizeTriangle(CheckTriangle{delaunay.Edges[delaunay.Edges[t.e].EPrev].ETwin, c}, firstCheck, false)
+        delaunay.legalizeTriangle(CheckTriangle{delaunay.Edges[delaunay.Edges[e1].EPrev].ETwin, c}, firstCheck, false)
 
         return
     }
@@ -684,10 +679,10 @@ func createConsecutiveTrianglesRight(frontier *t.Tree23, delaunay *Delaunay, bas
 
         // Validate towards the previous triangle created consecutively
         d := delaunay.Vertices[delaunay.Edges[delaunay.Edges[delaunay.Edges[e0].ETwin].EPrev].VOrigin].Pos
-        delaunay.legalizeTriangle(CheckTriangle{e0, d}, CheckTriangle{e0, d})
+        delaunay.legalizeTriangle(CheckTriangle{e0, d}, CheckTriangle{e0, d}, true)
         // Validate towards inside the triangulation
         d = delaunay.Vertices[delaunay.Edges[delaunay.Edges[delaunay.Edges[e1].ETwin].EPrev].VOrigin].Pos
-        delaunay.legalizeTriangle(CheckTriangle{e1, d}, CheckTriangle{e1, d})
+        delaunay.legalizeTriangle(CheckTriangle{e1, d}, CheckTriangle{e1, d}, true)
 
         createConsecutiveTrianglesRight(frontier, delaunay, baseVertex, nextFrontier, maxFillAngle)
 
@@ -815,9 +810,9 @@ func removeBasinRight(frontier *t.Tree23, delaunay *Delaunay, leafNode t.TreeNod
                 //fCurrent = newFCurrent
 
                 d := delaunay.Vertices[delaunay.Edges[delaunay.Edges[delaunay.Edges[lastEdge].ETwin].EPrev].VOrigin].Pos
-                delaunay.legalizeTriangle(CheckTriangle{lastEdge, d}, CheckTriangle{lastEdge, d})
+                delaunay.legalizeTriangle(CheckTriangle{lastEdge, d}, CheckTriangle{lastEdge, d}, true)
                 d = delaunay.Vertices[delaunay.Edges[delaunay.Edges[delaunay.Edges[currentEdge].ETwin].EPrev].VOrigin].Pos
-                delaunay.legalizeTriangle(CheckTriangle{currentEdge, d}, CheckTriangle{currentEdge, d})
+                delaunay.legalizeTriangle(CheckTriangle{currentEdge, d}, CheckTriangle{currentEdge, d}, true)
 
             } else {
                 break
@@ -876,10 +871,10 @@ func createConsecutiveTrianglesLeft(frontier *t.Tree23, delaunay *Delaunay, base
 
         // Validate towards the previous triangle created consecutively
         d := delaunay.Vertices[delaunay.Edges[delaunay.Edges[delaunay.Edges[e0].ETwin].EPrev].VOrigin].Pos
-        delaunay.legalizeTriangle(CheckTriangle{e0, d}, CheckTriangle{e0, d})
+        delaunay.legalizeTriangle(CheckTriangle{e0, d}, CheckTriangle{e0, d}, true)
         // Validate towards inside the triangulation
         d = delaunay.Vertices[delaunay.Edges[delaunay.Edges[delaunay.Edges[e1].ETwin].EPrev].VOrigin].Pos
-        delaunay.legalizeTriangle(CheckTriangle{e1, d}, CheckTriangle{e1, d})
+        delaunay.legalizeTriangle(CheckTriangle{e1, d}, CheckTriangle{e1, d}, true)
 
         createConsecutiveTrianglesLeft(frontier, delaunay, baseVertex, leafNode, maxFillAngle)
     }
@@ -1007,9 +1002,9 @@ func removeBasinLeft(frontier *t.Tree23, delaunay *Delaunay, leafNode t.TreeNode
                 //fCurrent = newFCurrent
 
                 d := delaunay.Vertices[delaunay.Edges[delaunay.Edges[delaunay.Edges[lastEdge].ETwin].EPrev].VOrigin].Pos
-                delaunay.legalizeTriangle(CheckTriangle{lastEdge, d}, CheckTriangle{lastEdge, d})
+                delaunay.legalizeTriangle(CheckTriangle{lastEdge, d}, CheckTriangle{lastEdge, d}, true)
                 d = delaunay.Vertices[delaunay.Edges[delaunay.Edges[delaunay.Edges[vRPlus.EdgeIndex].ETwin].EPrev].VOrigin].Pos
-                delaunay.legalizeTriangle(CheckTriangle{vRPlus.EdgeIndex, d}, CheckTriangle{vRPlus.EdgeIndex, d})
+                delaunay.legalizeTriangle(CheckTriangle{vRPlus.EdgeIndex, d}, CheckTriangle{vRPlus.EdgeIndex, d}, true)
 
             } else {
                 break
@@ -1072,16 +1067,14 @@ func extendByPoint(frontier *t.Tree23, p DelaunayPoint, delaunay *Delaunay, cent
     //   |/
     //   x
 
-
     frontier.ChangeValue(frontierItem, FrontElement{ej2, frontierItemValue.PolarAngle, frontierItemValue.Radius})
-    fmt.Printf("Insert0: %v\n", FrontElement{ei2, p.PolarAngle, p.Distance})
     frontier.Insert(FrontElement{ei2, p.PolarAngle, p.Distance})
 
     maxFillAngle := 125.0
 
     // There must exist a triangle behind the previous frontier edge. So this should be save.
     d := delaunay.Vertices[delaunay.Edges[delaunay.Edges[delaunay.Edges[existingE].ETwin].EPrev].VOrigin].Pos
-    delaunay.legalizeTriangle(CheckTriangle{existingE, d}, CheckTriangle{existingE, d})
+    delaunay.legalizeTriangle(CheckTriangle{existingE, d}, CheckTriangle{existingE, d}, true)
 
 
     previousLeaf,err := frontier.Previous(frontierItem)
