@@ -346,6 +346,14 @@ func calcPolarAngle(p v.Vector, origin v.Vector) float64 {
     return angle
 }
 
+func pointInTriangle(p0, p1, p2, test v.Vector) bool {
+    area := 0.5 *(-p1.Y*p2.X + p0.Y*(-p1.X + p2.X) + p0.X*(p1.Y - p2.Y) + p1.X*p2.Y)
+    s := 1./(2*area)*(p0.Y*p2.X - p0.X*p2.Y + (p2.Y - p0.Y)*test.X + (p0.X - p2.X)*test.Y)
+    t := 1./(2*area)*(p0.X*p1.Y - p0.Y*p1.X + (p0.Y - p1.Y)*test.X + (p1.X - p0.X)*test.Y)
+
+    return s > 0 && t > 0 && 1-s-t > 0
+}
+
 func preparePointList(points *v.PointList) DelaunayPointList {
     var dPointList DelaunayPointList
 
@@ -378,20 +386,21 @@ func preparePointList(points *v.PointList) DelaunayPointList {
 
     By(distance).Sort(dPointList.Points)
 
+
     // This is very hacky and should be improved first thing, when the algorithms works...
     // There should be a way to determine the first triangle where Origin is in without sorting/recalculating the list twice!!!
     dPointList.Origin = v.Div(v.Add(v.Add(dPointList.Points[0].Point, dPointList.Points[1].Point), dPointList.Points[2].Point), 3.0)
     // This is useless.
-    for i,p := range dPointList.Points {
-        dPointList.Points[i].Distance   = v.Length(v.Sub(p.Point, dPointList.Origin))
-        dPointList.Points[i].PolarAngle = calcPolarAngle(p.Point, dPointList.Origin)
-
-        //fmt.Printf("PointList: angle:%v, point:%v\n", dPointList.Points[i].PolarAngle, dPointList.Points[i].Point)
-    }
+    //for i,p := range dPointList.Points {
+    //    dPointList.Points[i].Distance   = v.Length(v.Sub(p.Point, dPointList.Origin))
+    //    dPointList.Points[i].PolarAngle = calcPolarAngle(p.Point, dPointList.Origin)
+    //
+    //    //fmt.Printf("PointList: angle:%v, point:%v\n", dPointList.Points[i].PolarAngle, dPointList.Points[i].Point)
+    //}
     // Like ... Really.
 
     //start := time.Now()
-    By(distance).Sort(dPointList.Points)
+    //By(distance).Sort(dPointList.Points)
     //binTime := time.Since(start).Nanoseconds()
 
     //fmt.Printf("Sort in Seconds: %.8f\n", float64(binTime)/1000000000.0)
@@ -479,13 +488,13 @@ func (delaunay *Delaunay)initializeTriangulation(pl *DelaunayPointList) *t.Tree2
     d.Edges[e].ENext = e2
     d.Edges[e2].ENext = e3
 
-    // TODO: Use precalculated polar angles instead of recalculating them. Should be straight forward.
+
     f0.EdgeIndex  = eT
-    f0.PolarAngle = calcPolarAngle(delaunay.Vertices[1].Pos, (*pl).Origin)
+    //f0.PolarAngle = calcPolarAngle(delaunay.Vertices[1].Pos, (*pl).Origin)
     f1.EdgeIndex = e2T
-    f1.PolarAngle = calcPolarAngle(delaunay.Vertices[2].Pos, (*pl).Origin)
+    //f1.PolarAngle = calcPolarAngle(delaunay.Vertices[2].Pos, (*pl).Origin)
     f2.EdgeIndex = e3T
-    f2.PolarAngle = calcPolarAngle(delaunay.Vertices[0].Pos, (*pl).Origin)
+    //f2.PolarAngle = calcPolarAngle(delaunay.Vertices[0].Pos, (*pl).Origin)
 
     // Pop first three points, because they are already triangulated by default
     pl.Points = pl.Points[3:]
@@ -498,21 +507,6 @@ func (delaunay *Delaunay)initializeTriangulation(pl *DelaunayPointList) *t.Tree2
 
     return frontier
 }
-
-// To project a point onto the frontier, we only need to know the polar angle, as the frontier
-// is sorted by polar angle, starting with 0.
-// The function returns both vertex indices in between the new point is projected (counter clockwise!)
-// TODO: Use or implement quadratic binary search/binary search for optimized location finding. Otherwise we might result in O(n²).
-//func (frontier Frontier)findFrontierPosition(polarAngle float64) int {
-//
-//    index, err := advsearch.InterpolationSearch(frontier, polarAngle)
-//    if err != nil {
-//        return 0
-//    }
-//    return index
-//}
-
-
 
 // Checks, if a given triangle is valid according to a given outer point.
 // For details see: https://en.wikipedia.org/wiki/Delaunay_triangulation
@@ -1105,8 +1099,12 @@ func extendByPoint(frontier *t.Tree23, p DelaunayPoint, delaunay *Delaunay, cent
 
 func (delaunay *Delaunay)triangulatePoints(pl *DelaunayPointList, frontier *t.Tree23) {
 
-    for _,p := range pl.Points {
-        extendByPoint(frontier, p, delaunay, (*pl).Origin)
+    var lastP DelaunayPoint
+    for i,p := range pl.Points {
+        if i == 0 || !v.Equal(p.Point, lastP.Point) {
+            extendByPoint(frontier, p, delaunay, (*pl).Origin)
+        }
+        lastP = p
     }
 
 }
