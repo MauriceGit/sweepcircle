@@ -11,6 +11,7 @@ import (
     //t "github.com/MauriceGit/tree23"
     t "tree23"
     //"time"
+    "sync"
 )
 
 const (
@@ -354,7 +355,7 @@ func pointInTriangle(p0, p1, p2, test v.Vector) bool {
     return s > 0 && t > 0 && 1-s-t > 0
 }
 
-func preparePointList(points *v.PointList) DelaunayPointList {
+func preparePointList(points *v.PointList, threadCount int) DelaunayPointList {
     var dPointList DelaunayPointList
 
     dPointList.Points = make([]DelaunayPoint, points.Len(), points.Len())
@@ -367,13 +368,38 @@ func preparePointList(points *v.PointList) DelaunayPointList {
     origin.Div(float64(points.Len()))
     dPointList.Origin = origin
 
-    for i,p := range *points {
-        dPointList.Points[i] = DelaunayPoint{
-                                             Point: p,
-                                             Distance: v.Length(v.Sub(p, dPointList.Origin)),
-                                             PolarAngle: calcPolarAngle(p, dPointList.Origin),
-                                            }
+    //for i,p := range *points {
+    //    dPointList.Points[i] = DelaunayPoint{
+    //                                         Point: p,
+    //                                         Distance: v.Length(v.Sub(p, dPointList.Origin)),
+    //                                         PolarAngle: calcPolarAngle(p, dPointList.Origin),
+    //                                        }
+    //}
+
+
+    var wg sync.WaitGroup
+    wg.Add(threadCount)
+    groupSize := len(dPointList.Points)/threadCount
+
+    for t := 0; t < threadCount; t++ {
+        upperCount := t*groupSize+groupSize
+        if t == threadCount-1 {
+            upperCount = len(dPointList.Points)
+        }
+        go func(tMin, tMax int) {
+            defer wg.Done()
+            for i := tMin; i < tMax; i++ {
+                p := (*points)[i]
+                dPointList.Points[i] = DelaunayPoint{
+                                                     Point: p,
+                                                     Distance: v.Length(v.Sub(p, dPointList.Origin)),
+                                                     PolarAngle: calcPolarAngle(p, dPointList.Origin),
+                                                    }
+            }
+        }(t*groupSize, upperCount)
     }
+
+    wg.Wait()
 
     distance := func(v1,v2 *DelaunayPoint) bool {
         // sort by radius
@@ -394,9 +420,29 @@ func preparePointList(points *v.PointList) DelaunayPointList {
     //for i,p := range dPointList.Points {
     //    dPointList.Points[i].Distance   = v.Length(v.Sub(p.Point, dPointList.Origin))
     //    dPointList.Points[i].PolarAngle = calcPolarAngle(p.Point, dPointList.Origin)
-    //
-    //    //fmt.Printf("PointList: angle:%v, point:%v\n", dPointList.Points[i].PolarAngle, dPointList.Points[i].Point)
     //}
+
+
+    wg.Add(threadCount)
+
+    for t := 0; t < threadCount; t++ {
+        upperCount := t*groupSize+groupSize
+        if t == threadCount-1 {
+            upperCount = len(dPointList.Points)
+        }
+        go func(tMin, tMax int) {
+            defer wg.Done()
+            for i := tMin; i < tMax; i++ {
+                p := dPointList.Points[i]
+                dPointList.Points[i].Distance   = v.Length(v.Sub(p.Point, dPointList.Origin))
+                dPointList.Points[i].PolarAngle = calcPolarAngle(p.Point, dPointList.Origin)
+            }
+        }(t*groupSize, upperCount)
+    }
+
+    wg.Wait()
+
+
     // Like ... Really.
 
     //start := time.Now()
@@ -490,11 +536,11 @@ func (delaunay *Delaunay)initializeTriangulation(pl *DelaunayPointList) *t.Tree2
 
 
     f0.EdgeIndex  = eT
-    //f0.PolarAngle = calcPolarAngle(delaunay.Vertices[1].Pos, (*pl).Origin)
+    f0.PolarAngle = calcPolarAngle(delaunay.Vertices[1].Pos, (*pl).Origin)
     f1.EdgeIndex = e2T
-    //f1.PolarAngle = calcPolarAngle(delaunay.Vertices[2].Pos, (*pl).Origin)
+    f1.PolarAngle = calcPolarAngle(delaunay.Vertices[2].Pos, (*pl).Origin)
     f2.EdgeIndex = e3T
-    //f2.PolarAngle = calcPolarAngle(delaunay.Vertices[0].Pos, (*pl).Origin)
+    f2.PolarAngle = calcPolarAngle(delaunay.Vertices[0].Pos, (*pl).Origin)
 
     // Pop first three points, because they are already triangulated by default
     pl.Points = pl.Points[3:]
@@ -629,8 +675,16 @@ func createConsecutiveTrianglesRight(frontier *t.Tree23, delaunay *Delaunay, bas
 
     basePos := delaunay.Vertices[baseVertex].Pos
 
+
+
+
     e0 := leafNodeValue.EdgeIndex
     e1 := nextFrontierValue.EdgeIndex
+
+    if baseVertex == 10 {
+        fmt.Printf("e0: %v\n", e0)
+        fmt.Printf("e1: %v\n", e1)
+    }
 
     v0 := delaunay.Vertices[delaunay.Edges[e0].VOrigin].Pos
     v1 := delaunay.Vertices[delaunay.Edges[e1].VOrigin].Pos
@@ -1022,11 +1076,17 @@ func extendByPoint(frontier *t.Tree23, p DelaunayPoint, delaunay *Delaunay, cent
         frontierItem,_ = frontier.GetSmallestLeaf()
     }
 
+
+
     frontierItemValue := frontier.GetValue(frontierItem).(FrontElement)
 
     vi := delaunay.createVertex(p.Point)
 
     existingE := frontierItemValue.EdgeIndex
+
+    if vi == 10 {
+        fmt.Printf("edge hit: %v\n", existingE)
+    }
 
     fi1 := delaunay.Edges[existingE].FFace
     twinV := delaunay.Edges[delaunay.Edges[existingE].ETwin].VOrigin
@@ -1064,7 +1124,7 @@ func extendByPoint(frontier *t.Tree23, p DelaunayPoint, delaunay *Delaunay, cent
     frontier.ChangeValue(frontierItem, FrontElement{ej2, frontierItemValue.PolarAngle, frontierItemValue.Radius})
     frontier.Insert(FrontElement{ei2, p.PolarAngle, p.Distance})
 
-    maxFillAngle := 125.0
+    maxFillAngle := 180.0
 
     // There must exist a triangle behind the previous frontier edge. So this should be save.
     d := delaunay.Vertices[delaunay.Edges[delaunay.Edges[delaunay.Edges[existingE].ETwin].EPrev].VOrigin].Pos
@@ -1107,13 +1167,29 @@ func (delaunay *Delaunay)triangulatePoints(pl *DelaunayPointList, frontier *t.Tr
         lastP = p
     }
 
+    // Finalization step so we have a valid convex hull afterwards!
+    //startFrontier,_ := frontier.GetSmallestLeaf()
+    //f := startFrontier
+    //start := true
+    //i := 0
+    //for (start || startFrontier != f) && i <= 10000 {
+    //    next,_ := frontier.Next(f)
+    //
+    //    edge := frontier.GetValue(next).(FrontElement).EdgeIndex
+    //    vertex := delaunay.Edges[edge].VOrigin
+    //    createConsecutiveTrianglesRight(frontier, delaunay, vertex, f, 180)
+    //
+    //    f = next
+    //    i++
+    //}
+
 }
 
-func Triangulate(pointList v.PointList) Delaunay {
+func TriangulateMultithreaded(pointList v.PointList, threadCount int) Delaunay {
 
-    dPointList := preparePointList(&pointList)
+    dPointList := preparePointList(&pointList, threadCount)
     //defer fmt.Printf("point to be inserted last: %v\n", dPointList.Points[52])
-    //dPointList.Points = dPointList.Points[:95]
+    dPointList.Points = dPointList.Points[:11]
 
     // Any planar triangulation: total degree == 3f + k = 2e
     // With k == points on convex hull of all points. Let k = p
@@ -1125,9 +1201,9 @@ func Triangulate(pointList v.PointList) Delaunay {
     delaunay := Delaunay {
         Vertices:           make([]he.HEVertex, len(dPointList.Points)),
         FirstFreeVertexPos: 0,
-        Edges:              make([]he.HEEdge, edgeCount + 1000),
+        Edges:              make([]he.HEEdge, edgeCount),
         FirstFreeEdgePos:   0,
-        Faces:              make([]he.HEFace, edgeCount/3 + len(dPointList.Points)+1000),
+        Faces:              make([]he.HEFace, edgeCount/3 + len(dPointList.Points)),
         FirstFreeFacePos:   0,
     }
 
@@ -1137,4 +1213,8 @@ func Triangulate(pointList v.PointList) Delaunay {
 
     return delaunay
 
+}
+
+func Triangulate(pointList v.PointList) Delaunay {
+    return TriangulateMultithreaded(pointList, 1)
 }
