@@ -1181,7 +1181,7 @@ func extendByPoint(frontier *t.Tree23, p DelaunayPoint, delaunay *Delaunay, cent
     //   x
 
 
-    maxFillAngle := 180.0
+    maxFillAngle := 120.0
 
     previousLeaf,_ := frontier.Previous(frontierItem)
 
@@ -1221,23 +1221,24 @@ func (delaunay *Delaunay)triangulatePoints(pl *DelaunayPointList, frontier *t.Tr
         lastP = p
     }
 
-    //frontier.PrettyPrint()
-
     // Finalization step so we have a valid convex hull afterwards!
-    //startFrontier,_ := frontier.GetSmallestLeaf()
-    //f := startFrontier
-    //start := true
-    //i := 0
-    //for (start || startFrontier != f) && i <= 10000 {
-    //    next,_ := frontier.Next(f)
-    //
-    //    edge := frontier.GetValue(next).(FrontElement).EdgeIndex
-    //    vertex := delaunay.Edges[edge].VOrigin
-    //    createConsecutiveTrianglesRight(frontier, delaunay, vertex, f, 180)
-    //
-    //    f = next
-    //    i++
-    //}
+    f,_ := frontier.GetLargestLeaf()
+    fV := frontier.GetValue(f).(FrontElement)
+    prev,_ := frontier.Previous(f)
+    prevV := frontier.GetValue(prev).(FrontElement)
+
+    for fV.PolarAngle > prevV.PolarAngle {
+        frontierVertex := delaunay.Edges[prevV.EdgeIndex].VOrigin
+        createConsecutiveTrianglesRight(frontier, delaunay, frontierVertex, f, 180)
+
+        f = prev
+        fV = prevV
+        prev,_ = frontier.Previous(f)
+        prevV  = frontier.GetValue(prev).(FrontElement)
+    }
+
+
+
 
 }
 
@@ -1261,7 +1262,8 @@ func TriangulateMultithreaded(pointList v.PointList, threadCount int) Delaunay {
         FirstFreeVertexPos: 0,
         Edges:              make([]he.HEEdge, edgeCount),
         FirstFreeEdgePos:   0,
-        Faces:              make([]he.HEFace, edgeCount/3 + len(dPointList.Points)),
+        //Faces:              make([]he.HEFace, edgeCount/3 + len(dPointList.Points)),
+        Faces:              make([]he.HEFace, edgeCount/3),
         FirstFreeFacePos:   0,
     }
 
