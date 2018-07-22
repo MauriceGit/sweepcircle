@@ -8,7 +8,9 @@ import (
     "errors"
     "sort"
     "math"
-    s "github.com/MauriceGit/skiplist"
+    //t "github.com/MauriceGit/tree23"
+    t "tree23"
+    s "skiplist"
     //"time"
     "sync"
 )
@@ -60,6 +62,10 @@ var EmptyV = he.HEVertex{}
 // and just reuse it.
 var g_matrixElements = [4][4]float64{{1,1,1,1},{1,1,1,1},{1,1,1,1},{1,1,1,1}}
 
+var listFrontier s.SkipList = s.NewEps(EPS)
+
+
+
 
 func (dp DelaunayPoint) String() string {
     return fmt.Sprintf("{Point: %v, Distance: %v, PolarAngle: %v}", dp.Point, dp.Distance, dp.PolarAngle)
@@ -97,16 +103,29 @@ func (dpl DelaunayPointList) String() string {
 //    return float64((*f)[i].PolarAngle)
 //}
 
-// ExtractKey() and String() are part of the Skiplist interface that needs to be implemented!
-func (e FrontElement) ExtractKey() float64 {
-    return e.PolarAngle
-}
-func (e FrontElement) String() string {
+// Equal is part of the Tree23 interface
+func (f FrontElement) Equal(f2 t.TreeElement) bool {
 
-    return fmt.Sprintf("%03d", int(e.PolarAngle))
-    //return fmt.Sprintf("%.0f", e.PolarAngle)
+    fe := f2.(FrontElement)
+    return math.Abs(f.PolarAngle - fe.PolarAngle) <= EPS && math.Abs(f.Radius - fe.Radius) <= EPS
+    //return math.Abs(f.PolarAngle - f2.(FrontElement).PolarAngle) <= EPS
+}
+// ExtractValue is part of the Tree23 interface
+func (f FrontElement) ExtractValue() float64 {
+    return f.PolarAngle
 }
 
+func (f FrontElement) ExtractKey() float64 {
+    return f.PolarAngle
+}
+func (f FrontElement) String() string {
+    base := int(f.PolarAngle)
+    baseString := fmt.Sprintf("%03d", base)
+    rest := int((f.PolarAngle-float64(base)) * 10.0)
+    restString := fmt.Sprintf("%02d", rest)
+
+    return fmt.Sprintf("%s.%s", baseString, restString)
+}
 
 
 // By is the type of a "less" function that defines the ordering of its Planet arguments.
@@ -170,10 +189,9 @@ func (v *Delaunay) pprint() {
     fmt.Printf("\n")
 }
 
-func print(frontier *s.SkipList, delaunay *Delaunay, title string) {
+func print(frontier *t.Tree23, delaunay *Delaunay, title string) {
 
     //frontier.Pprint()
-    frontier.PrettyPrint()
 
     //fmt.Printf("%s\n\t", title)
     //for _,f := range *frontier {
@@ -449,7 +467,7 @@ func preparePointList(points *v.PointList, threadCount int) DelaunayPointList {
     return dPointList
 }
 
-func (delaunay *Delaunay)initializeTriangulation(pl *DelaunayPointList) *s.SkipList {
+func (delaunay *Delaunay)initializeTriangulation(pl *DelaunayPointList) *t.Tree23 {
 
     //var frontier Frontier = make([]FrontElement, 3, len((*pl).Points))
 
@@ -539,14 +557,16 @@ func (delaunay *Delaunay)initializeTriangulation(pl *DelaunayPointList) *s.SkipL
     // Pop first three points, because they are already triangulated by default
     pl.Points = pl.Points[3:]
 
-    frontier := s.NewSeedEps(1531647372017545038, 0.000000001)
+    frontier := t.New()
 
-    //fmt.Printf("First three inserts: %v, %v, %v\n", f0, f1, f2)
     frontier.Insert(f0)
     frontier.Insert(f1)
     frontier.Insert(f2)
+    listFrontier.Insert(f0)
+    listFrontier.Insert(f1)
+    listFrontier.Insert(f2)
 
-    return &frontier
+    return frontier
 }
 
 // Checks, if a given triangle is valid according to a given outer point.
@@ -670,12 +690,24 @@ func (delaunay *Delaunay) legalizeTriangle(e he.EdgeIndex, v v.Vector, firstE he
 // that match the pi/2 angle criteria.
 // TODO: Pass vector position directly without going through the frontier and delaunay every time.
 // Returns, how many consecutive triangles were created to the right.
-func createConsecutiveTrianglesRight(frontier *s.SkipList, delaunay *Delaunay, baseVertex he.VertexIndex, leafNode *s.SkipListElement, maxFillAngle float64) {
+func createConsecutiveTrianglesRight(frontier *t.Tree23, delaunay *Delaunay, baseVertex he.VertexIndex, leafNode t.TreeNodeIndex, listLeafNode *s.SkipListElement, maxFillAngle float64) {
 
-    nextFrontier := frontier.Next(leafNode)
+    nextFrontier,_ := frontier.Next(leafNode)
+    leafNodeValue := frontier.GetValue(leafNode).(FrontElement)
+    nextFrontierValue := frontier.GetValue(nextFrontier).(FrontElement)
 
-    leafNodeValue := leafNode.GetValue().(FrontElement)
-    nextFrontierValue := nextFrontier.GetValue().(FrontElement)
+
+    // With SkipList ===================================================
+    listNextFrontier := listFrontier.Next(listLeafNode)
+    listLeafNodeValue := listLeafNode.GetValue().(FrontElement)
+    listNextFrontierValue := listNextFrontier.GetValue().(FrontElement)
+    if !leafNodeValue.Equal(listLeafNodeValue) {
+        fmt.Println("ERROR 7")
+    }
+    if !nextFrontierValue.Equal(listNextFrontierValue) {
+        fmt.Println("ERROR 8")
+    }
+    // =================================================================
 
     basePos := delaunay.Vertices[baseVertex].Pos
 
@@ -721,9 +753,12 @@ func createConsecutiveTrianglesRight(frontier *s.SkipList, delaunay *Delaunay, b
         delaunay.Edges[e1].ENext = e0
 
         frontier.ChangeValue(nextFrontier, FrontElement{eNew2, nextFrontierValue.PolarAngle, nextFrontierValue.Radius})
-
-        //fmt.Printf("%v --> %v\n", leafNode, leafNodeValue)
         frontier.Delete(leafNodeValue)
+
+        // With SkipList ===============================================
+        listFrontier.ChangeValue(listNextFrontier, FrontElement{eNew2, nextFrontierValue.PolarAngle, nextFrontierValue.Radius})
+        listFrontier.Delete(listLeafNodeValue)
+        // =============================================================
 
         // Validate towards the previous triangle created consecutively
         d := delaunay.Vertices[delaunay.Edges[delaunay.Edges[delaunay.Edges[e0].ETwin].EPrev].VOrigin].Pos
@@ -732,7 +767,7 @@ func createConsecutiveTrianglesRight(frontier *s.SkipList, delaunay *Delaunay, b
         d = delaunay.Vertices[delaunay.Edges[delaunay.Edges[delaunay.Edges[e1].ETwin].EPrev].VOrigin].Pos
         delaunay.legalizeTriangle(e1, d, e1, true)
 
-        createConsecutiveTrianglesRight(frontier, delaunay, baseVertex, nextFrontier, maxFillAngle)
+        createConsecutiveTrianglesRight(frontier, delaunay, baseVertex, nextFrontier, listNextFrontier, maxFillAngle)
 
     }
 
@@ -879,12 +914,23 @@ func createConsecutiveTrianglesRight(frontier *s.SkipList, delaunay *Delaunay, b
 // Recursive function that walks right as long as there is a triangle to be created (to fill holes)
 // that match the pi/2 angle criteria.
 // TODO: Pass vector position directly without going through the frontier and delaunay every time.
-func createConsecutiveTrianglesLeft(frontier *s.SkipList, delaunay *Delaunay, baseVertex he.VertexIndex, leafNode *s.SkipListElement, maxFillAngle float64) {
+func createConsecutiveTrianglesLeft(frontier *t.Tree23, delaunay *Delaunay, baseVertex he.VertexIndex, leafNode t.TreeNodeIndex, listLeafNode *s.SkipListElement, maxFillAngle float64) {
 
-    leafNodeValue := leafNode.GetValue().(FrontElement)
+    leafNodeValue := frontier.GetValue(leafNode).(FrontElement)
+    prevFrontier,_ := frontier.Previous(leafNode)
+    prevFrontierValue := frontier.GetValue(prevFrontier).(FrontElement)
 
-    prevFrontier := frontier.Prev(leafNode)
-    prevFrontierValue := prevFrontier.GetValue().(FrontElement)
+    // With SkipList ===================================================
+    listLeafNodeValue := listLeafNode.GetValue().(FrontElement)
+    listPrevFrontier := listFrontier.Prev(listLeafNode)
+    listPrevFrontierValue := listPrevFrontier.GetValue().(FrontElement)
+    if !leafNodeValue.Equal(listLeafNodeValue) {
+        fmt.Println("ERROR 9")
+    }
+    if !prevFrontierValue.Equal(listPrevFrontierValue) {
+        fmt.Println("ERROR 10")
+    }
+    // =================================================================
 
     basePos := delaunay.Vertices[baseVertex].Pos
 
@@ -918,8 +964,12 @@ func createConsecutiveTrianglesLeft(frontier *s.SkipList, delaunay *Delaunay, ba
         delaunay.Edges[e1].EPrev = e0
 
         frontier.ChangeValue(leafNode, FrontElement{eNew2, leafNodeValue.PolarAngle, leafNodeValue.Radius})
-
         frontier.Delete(prevFrontierValue)
+
+        // With SkipList ===============================================
+        listFrontier.ChangeValue(listLeafNode, FrontElement{eNew2, leafNodeValue.PolarAngle, leafNodeValue.Radius})
+        listFrontier.Delete(listPrevFrontierValue)
+        // =============================================================
 
         // Validate towards the previous triangle created consecutively
         d := delaunay.Vertices[delaunay.Edges[delaunay.Edges[delaunay.Edges[e0].ETwin].EPrev].VOrigin].Pos
@@ -928,7 +978,7 @@ func createConsecutiveTrianglesLeft(frontier *s.SkipList, delaunay *Delaunay, ba
         d = delaunay.Vertices[delaunay.Edges[delaunay.Edges[delaunay.Edges[e1].ETwin].EPrev].VOrigin].Pos
         delaunay.legalizeTriangle(e1, d, e1, true)
 
-        createConsecutiveTrianglesLeft(frontier, delaunay, baseVertex, leafNode, maxFillAngle)
+        createConsecutiveTrianglesLeft(frontier, delaunay, baseVertex, leafNode, listLeafNode, maxFillAngle)
     }
 }
 
@@ -1072,24 +1122,55 @@ func createConsecutiveTrianglesLeft(frontier *s.SkipList, delaunay *Delaunay, ba
 //
 //}
 
-func extendByPoint(frontier *s.SkipList, p DelaunayPoint, delaunay *Delaunay, center v.Vector) {
+func extendByPoint(frontier *t.Tree23, p DelaunayPoint, delaunay *Delaunay, center v.Vector) {
 
-    frontierItem, ok := frontier.FindGreaterOrEqual(FrontElement{-1, p.PolarAngle, -1.0})
+    frontierItem, err := frontier.FindFirstLargerLeaf(p.PolarAngle)
     // In this case, p.PolarAngle is after the very last node
-    if !ok {
-        frontierItem = frontier.GetSmallestNode()
+    if err != nil {
+        frontierItem,_ = frontier.GetSmallestLeaf()
     }
+    frontierItemValue := frontier.GetValue(frontierItem).(FrontElement)
 
-    frontierItemValue := frontierItem.GetValue().(FrontElement)
+    // With SkipList ===================================================
+    listFrontierItem, ok := listFrontier.FindGreaterOrEqual(FrontElement{-1, p.PolarAngle, 0.0})
+    if !ok {
+        listFrontierItem = listFrontier.GetSmallestNode()
+    }
+    listFrontierItemValue := listFrontierItem.GetValue().(FrontElement)
+    if !frontierItemValue.Equal(listFrontierItemValue) {
+        fmt.Printf("ERROR 1\n")
 
+        //frontier.PrettyPrint()
+        //
+        //listFrontier.PrettyPrint()
+        //
+        //fmt.Printf("PolarAngle: %.10f\n", p.PolarAngle)
+        //fmt.Printf("..: %.10f\n", frontierItemValue.PolarAngle)
+        //fmt.Printf("..: %.10f\n", listFrontierItemValue.PolarAngle)
+        //
+        //os.Exit(0)
 
+    }
+    // =================================================================
 
     vi := delaunay.createVertex(p.Point)
 
     existingE := frontierItemValue.EdgeIndex
+    nextLeaf,_ := frontier.Next(frontierItem)
+    nextLeafV,_ := frontier.GetValue(nextLeaf).(FrontElement)
 
-    nextLeaf := frontier.Next(frontierItem)
-    nextLeafV := nextLeaf.GetValue().(FrontElement)
+    // With SkipList ===================================================
+    listExistingE := listFrontierItemValue.EdgeIndex
+    listNextLeaf := listFrontier.Next(listFrontierItem)
+    listNextLeafV := listNextLeaf.GetValue().(FrontElement)
+    if !nextLeafV.Equal(listNextLeafV) {
+        fmt.Printf("ERROR 2\n")
+    }
+    if existingE != listExistingE {
+        fmt.Println("ERROR 2a")
+    }
+    // =================================================================
+
     hitVertex := false
     // If we have all vertices on a line, we don't want to create two triangles to somewhere.
     // We only create two triangles when the second one is well defined (has some angle)
@@ -1149,26 +1230,35 @@ func extendByPoint(frontier *s.SkipList, p DelaunayPoint, delaunay *Delaunay, ce
         delaunay.Edges[nextLeafV.EdgeIndex].FFace = fj2
         delaunay.Edges[ej2].EPrev = nextLeafV.EdgeIndex
 
-        ok := frontier.ChangeValue(nextLeaf, FrontElement{ek2, nextLeafV.PolarAngle, nextLeafV.Radius})
+        frontier.ChangeValue(nextLeaf, FrontElement{ek2, nextLeafV.PolarAngle, nextLeafV.Radius})
+        frontier.ChangeValueUnsafe(frontierItem, FrontElement{ei2, frontierItemValue.PolarAngle, p.Distance})
+
+        // With SkipList ===============================================
+        ok := listFrontier.ChangeValue(listNextLeaf, FrontElement{ek2, nextLeafV.PolarAngle, nextLeafV.Radius})
         if !ok {
-            fmt.Printf("1: ChangeValue did NOT work!!!\n")
+            fmt.Println("ERROR 3")
         }
-        ok  = frontier.ChangeValue(frontierItem, FrontElement{ei2, frontierItemValue.PolarAngle, p.Distance})
+        ok = listFrontier.ChangeValue(listFrontierItem, FrontElement{ei2, frontierItemValue.PolarAngle, p.Distance})
         if !ok {
-            fmt.Printf("2: ChangeValue did NOT work!!!\n")
+            fmt.Println("ERROR 4")
         }
+        // =============================================================
 
         // There must exist a triangle behind the previous frontier edge. So this should be save.
         d2 := delaunay.Vertices[delaunay.Edges[delaunay.Edges[delaunay.Edges[nextLeafV.EdgeIndex].ETwin].EPrev].VOrigin].Pos
         delaunay.legalizeTriangle(nextLeafV.EdgeIndex, d2, nextLeafV.EdgeIndex, true)
 
     } else {
-        ok := frontier.ChangeValue(frontierItem, FrontElement{ej2, frontierItemValue.PolarAngle, frontierItemValue.Radius})
-        if !ok {
-            fmt.Printf("3: ChangeValue did NOT work!!!\n")
-        }
-        //fmt.Printf("Insert: %v\n", FrontElement{ei2, p.PolarAngle, p.Distance})
+        frontier.ChangeValue(frontierItem, FrontElement{ej2, frontierItemValue.PolarAngle, frontierItemValue.Radius})
         frontier.Insert(FrontElement{ei2, p.PolarAngle, p.Distance})
+
+        // With SkipList ===============================================
+        ok := listFrontier.ChangeValue(listFrontierItem, FrontElement{ej2, frontierItemValue.PolarAngle, frontierItemValue.Radius})
+        if !ok {
+            fmt.Println("ERROR 5")
+        }
+        listFrontier.Insert(FrontElement{ei2, p.PolarAngle, p.Distance})
+        // =============================================================
 
     }
 
@@ -1194,9 +1284,18 @@ func extendByPoint(frontier *s.SkipList, p DelaunayPoint, delaunay *Delaunay, ce
 
     maxFillAngle := 120.0
 
-    previousLeaf := frontier.Prev(frontierItem)
+    previousLeaf,_ := frontier.Previous(frontierItem)
 
-    createConsecutiveTrianglesRight(frontier, delaunay, vi, frontierItem, maxFillAngle)
+    // With SkipList ===================================================
+    listPreviousLeaf := listFrontier.Prev(listFrontierItem)
+    previousLeafV,_ := frontier.GetValue(previousLeaf).(FrontElement)
+    listPreviousLeafV := listPreviousLeaf.GetValue().(FrontElement)
+    if !previousLeafV.Equal(listPreviousLeafV) {
+        fmt.Println("ERROR 6")
+    }
+    // =================================================================
+
+    createConsecutiveTrianglesRight(frontier, delaunay, vi, frontierItem, listFrontierItem, maxFillAngle)
     //removeBasinRight(frontier, delaunay, previousLeaf)
 
 
@@ -1215,14 +1314,14 @@ func extendByPoint(frontier *s.SkipList, p DelaunayPoint, delaunay *Delaunay, ce
     // |/                   // createConsecutiveTrianglesLeft will create triangles on this side!
     // x
 
-    createConsecutiveTrianglesLeft(frontier, delaunay, vi, previousLeaf, maxFillAngle)
+    createConsecutiveTrianglesLeft(frontier, delaunay, vi, previousLeaf, listPreviousLeaf, maxFillAngle)
     //removeBasinLeft(frontier, delaunay, previousLeaf)
 
 
 
 }
 
-func (delaunay *Delaunay)triangulatePoints(pl *DelaunayPointList, frontier *s.SkipList) {
+func (delaunay *Delaunay)triangulatePoints(pl *DelaunayPointList, frontier *t.Tree23) {
 
     var lastP DelaunayPoint
     for i,p := range pl.Points {
@@ -1233,19 +1332,40 @@ func (delaunay *Delaunay)triangulatePoints(pl *DelaunayPointList, frontier *s.Sk
     }
 
     // Finalization step so we have a valid convex hull afterwards!
-    f := frontier.GetLargestNode()
-    fV := f.GetValue().(FrontElement)
-    prev := frontier.Prev(f)
-    prevV := prev.GetValue().(FrontElement)
+    f,_ := frontier.GetLargestLeaf()
+    fV := frontier.GetValue(f).(FrontElement)
+    prev,_ := frontier.Previous(f)
+    prevV := frontier.GetValue(prev).(FrontElement)
+
+    // With SkipList ===================================================
+    listF := listFrontier.GetLargestNode()
+    listFV := listF.GetValue().(FrontElement)
+    listPrev := listFrontier.Prev(listF)
+    listPrevV := listPrev.GetValue().(FrontElement)
+    if !fV.Equal(listFV) || !prevV.Equal(listPrevV) {
+        fmt.Printf("ERROR 0\n")
+    }
+    // =================================================================
 
     for fV.PolarAngle > prevV.PolarAngle {
         frontierVertex := delaunay.Edges[prevV.EdgeIndex].VOrigin
-        createConsecutiveTrianglesRight(frontier, delaunay, frontierVertex, f, 180)
+        createConsecutiveTrianglesRight(frontier, delaunay, frontierVertex, f, listF, 180)
 
         f = prev
         fV = prevV
-        prev = frontier.Prev(f)
-        prevV  = prev.GetValue().(FrontElement)
+        prev,_ = frontier.Previous(f)
+        prevV  = frontier.GetValue(prev).(FrontElement)
+
+        // With SkipList ===============================================
+        listF = listPrev
+        listFV = listPrevV
+        listPrev = listFrontier.Prev(listF)
+        listPrevV = listPrev.GetValue().(FrontElement)
+        if !prevV.Equal(listPrevV) {
+            fmt.Println("ERROR 0a")
+        }
+        // =============================================================
+
     }
 
 
