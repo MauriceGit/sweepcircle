@@ -8,7 +8,7 @@ import (
     "errors"
     "sort"
     "math"
-    s "github.com/MauriceGit/skiplist"
+    s "skiplist"
     //"time"
     "sync"
 )
@@ -60,6 +60,27 @@ var EmptyV = he.HEVertex{}
 // and just reuse it.
 var g_matrixElements = [4][4]float64{{1,1,1,1},{1,1,1,1},{1,1,1,1},{1,1,1,1}}
 
+func (d Delaunay) String() string {
+    s := "Vertices: \n"
+    for i,v := range d.Vertices {
+        if v != EmptyV {
+            s += fmt.Sprintf("    %2d: %v\n", i, v)
+        }
+    }
+    s += "\nEdges: \n"
+    for i,e := range d.Edges {
+        if e != EmptyE {
+            s += fmt.Sprintf("    %2d: %v\n", i, e)
+        }
+    }
+    s += "\nFaces: \n"
+    for i,f := range d.Faces {
+        if f != EmptyF {
+            s += fmt.Sprintf("    %2d: %v\n", i, f)
+        }
+    }
+    return s
+}
 
 func (dp DelaunayPoint) String() string {
     return fmt.Sprintf("{Point: %v, Distance: %v, PolarAngle: %v}", dp.Point, dp.Distance, dp.PolarAngle)
@@ -173,7 +194,7 @@ func (v *Delaunay) pprint() {
 func print(frontier *s.SkipList, delaunay *Delaunay, title string) {
 
     //frontier.Pprint()
-    frontier.PrettyPrint()
+    fmt.Println(frontier)
 
     //fmt.Printf("%s\n\t", title)
     //for _,f := range *frontier {
@@ -192,93 +213,74 @@ func (de *Delaunay) Verify() error {
 
             // Every valid edge MUST have a valid Twin edge!
             if e.ETwin == he.EmptyEdge || de.Edges[e.ETwin] == EmptyE {
-                return errors.New(fmt.Sprintf("Edge %de: %de has an invalid twin edge", i, e))
+                return errors.New(fmt.Sprintf("Edge %v: %v has an invalid twin edge", i, e))
             }
 
             // Twins must refer to each other!
             if i != int(de.Edges[e.ETwin].ETwin) {
-                return errors.New(fmt.Sprintf("Edge %de and his Twin %de don't refer to each other", i, e.ETwin))
+                return errors.New(fmt.Sprintf("Edge %v and his Twin %v don't refer to each other", i, e.ETwin))
             }
 
             // Check if the origin vertex is valid (if there is one)
-            if e.VOrigin != he.EmptyVertex && e.VOrigin != he.InfiniteVertex && de.Vertices[e.VOrigin] == EmptyV {
-                return errors.New(fmt.Sprintf("Origin vertex of edge %de: %de is invalid", i, e))
+            if e.VOrigin == he.EmptyVertex || de.Vertices[e.VOrigin] == EmptyV {
+                return errors.New(fmt.Sprintf("Origin vertex of edge %v: %v is invalid", i, e))
             }
 
-            // Check, if the face is valid
-            if e.FFace == he.EmptyFace || de.Faces[e.FFace] == EmptyF {
-                return errors.New(fmt.Sprintf("Face of edge %de: %de is invalid", i, e))
-            }
-
-            // if VOrigin is Empty, it MUST be the referenced edge for the face of the edge!
-            if (e.VOrigin == he.EmptyVertex || e.VOrigin == he.InfiniteVertex) && i != int(de.Faces[e.FFace].EEdge) {
-                return errors.New(fmt.Sprintf("A first edge %de: %de must be referenced as first edge by the corresponding face %de!", e, i, e.FFace))
+            // Check, if the face is valid (if defined)
+            if e.FFace != he.EmptyFace && de.Faces[e.FFace] == EmptyF {
+                return errors.New(fmt.Sprintf("Face of edge %v: %v is invalid", i, e.FFace))
             }
 
             // Check, if the next edge is valid
             if e.ENext != he.EmptyEdge && de.Edges[e.ENext] == EmptyE {
-                return errors.New(fmt.Sprintf("Next edge for edge %de: %de is invalid", i, e))
+                return errors.New(fmt.Sprintf("Next edge for edge %v: %v is invalid", i, e))
             }
 
             // Check, if the prev edge is valid
             if e.EPrev != he.EmptyEdge && de.Edges[e.EPrev] == EmptyE {
-                return errors.New(fmt.Sprintf("Prev edge for edge %de: %de is invalid", i, e))
-            }
-
-            // If the prev edge is valid
-            if e.VOrigin != he.EmptyVertex && e.VOrigin != he.InfiniteVertex && e.EPrev == he.EmptyEdge {
-                return errors.New(fmt.Sprintf("Prev edge for edge %de: %de is not defined but should be", i, e))
+                return errors.New(fmt.Sprintf("Prev edge for edge %v: %v is invalid", i, e))
             }
 
             // If this->next is not empty, the next one must have a previous edge.
             if e.ENext != he.EmptyEdge && de.Edges[e.ENext].EPrev == he.EmptyEdge {
-                return errors.New(fmt.Sprintf("Next edge for edge %de must have a non-empty prev", i))
+                return errors.New(fmt.Sprintf("Next edge for edge %v must have a non-empty prev", i))
             }
 
             // The this edge must correspond to the next->prev edge
             if e.ENext != he.EmptyEdge && de.Edges[e.ENext].EPrev != he.EmptyEdge && de.Edges[e.ENext].EPrev != he.EdgeIndex(i) {
-                return errors.New(fmt.Sprintf("The edge %de has %de as next edge, which has %de as his previous. They must reference each other!", i, e.ENext, de.Edges[e.ENext].EPrev))
+                return errors.New(fmt.Sprintf("The edge %v has %v as next edge, which has %v as his previous. They must reference each other!", i, e.ENext, de.Edges[e.ENext].EPrev))
             }
-
-
-
         }
     }
 
     for i,f := range de.Faces {
         if f != EmptyF {
 
-            // Check for valid reference point
-            if f.ReferencePoint == v.InfinitePoint {
-                return errors.New(fmt.Sprintf("Face %de: %de has infinite reference point", i, f))
-            }
-
             // Check for valid EEdge
             if f.EEdge == he.EmptyEdge || de.Edges[f.EEdge] == EmptyE {
-                return errors.New(fmt.Sprintf("Face %de: %de points to invalid edge", i, f))
+                return errors.New(fmt.Sprintf("Face %v: %v points to invalid edge", i, f))
             }
 
             // If the edge is the first one (no/infinite start-vertex), it's all good.
             // Otherwise check, that the edges actually go all the way around the face!
-            if de.Edges[f.EEdge].VOrigin != he.EmptyVertex && de.Edges[f.EEdge].VOrigin != he.InfiniteVertex {
-                startEdge := f.EEdge
-                edgeCount := 0
-                e := de.Edges[startEdge].ENext
+            startEdge := f.EEdge
+            edgeCount := 0
+            e := de.Edges[startEdge].ENext
 
-                for e != he.EmptyEdge && e != startEdge {
+            for e != he.EmptyEdge && e != startEdge {
 
-                    if int(de.Edges[e].FFace) != i {
-                        return errors.New(fmt.Sprintf("Edge %de of the face %de: %de does not point to the right face!", e, i, f))
-                    }
+                if int(de.Edges[e].FFace) != i {
+                    return errors.New(fmt.Sprintf("Edge %v of the face %v: %v does not point to the right face!", e, i, f))
+                }
 
-                    if edgeCount > 50 {
-                        return errors.New(fmt.Sprintf("Looping around the edges of the face %de: %de most likely does not stop (infinite loop)", i, f))
-                    }
+                e = de.Edges[e].ENext
+                edgeCount += 1
 
-                    e = de.Edges[e].ENext
-                    edgeCount += 1
+                if edgeCount > 3 {
+                    return errors.New(fmt.Sprintf("Looping around the edges of the face %v: %v are more than 3", i, f))
                 }
             }
+
         }
     }
 
@@ -497,7 +499,9 @@ func (delaunay *Delaunay)initializeTriangulation(pl *DelaunayPointList) *s.SkipL
     }
     delaunay.FirstFreeVertexPos = 3
 
-    f := delaunay.createFace(v.Vector{}, 0)
+    // We can write edge == 0 because e will be the very first edge that will always be at index 0.
+    // We write a -1 vector so it is different to Vector{}.
+    f := delaunay.createFace(v.Vector{-1,-1,-1}, 0)
 
     // Edge 0-->1
     e   := delaunay.createEdge(0, he.EmptyEdge, he.EmptyEdge, he.EmptyEdge, f, v.Edge{})
@@ -539,7 +543,7 @@ func (delaunay *Delaunay)initializeTriangulation(pl *DelaunayPointList) *s.SkipL
     // Pop first three points, because they are already triangulated by default
     pl.Points = pl.Points[3:]
 
-    frontier := s.NewSeedEps(1531647372017545038, 0.000000001)
+    frontier := s.NewEps(0.000000001)
 
     //fmt.Printf("First three inserts: %v, %v, %v\n", f0, f1, f2)
     frontier.Insert(f0)
@@ -581,13 +585,11 @@ func (delaunay *Delaunay) flipEdge(e he.EdgeIndex) {
     eT1 := delaunay.Edges[eT].ENext
     eT2 := delaunay.Edges[eT1].ENext
 
-    // Check face reference to e or eT
-    if delaunay.Faces[delaunay.Edges[e].FFace].EEdge == e {
-        delaunay.Faces[delaunay.Edges[e].FFace].EEdge = e2
-    }
-    if delaunay.Faces[delaunay.Edges[eT].FFace].EEdge == eT {
-        delaunay.Faces[delaunay.Edges[eT].FFace].EEdge = eT2
-    }
+    // Let's make sure that the face references are not affected by flipping the middle edge
+    // by just assigning them to an edge that will stay with the same face reference anyway!
+    // There could be an extra check for this but this should be not really slower and is correct every time.
+    delaunay.Faces[delaunay.Edges[e].FFace].EEdge = e2
+    delaunay.Faces[delaunay.Edges[eT].FFace].EEdge = eT2
 
     delaunay.Edges[e2].ENext  = eT1
     delaunay.Edges[eT1].EPrev = e2
@@ -703,7 +705,7 @@ func createConsecutiveTrianglesRight(frontier *s.SkipList, delaunay *Delaunay, b
         // |   /
 
         // Create one new triangle before calling recursively.
-        f := delaunay.createFace(v.Vector{}, e0)
+        f := delaunay.createFace(v.Vector{-1,-1,-1}, e0)
         delaunay.Edges[e0].FFace = f
         delaunay.Edges[e1].FFace = f
 
@@ -900,7 +902,7 @@ func createConsecutiveTrianglesLeft(frontier *s.SkipList, delaunay *Delaunay, ba
 
     if isLeft && angle <= maxFillAngle {
 
-        f := delaunay.createFace(v.Vector{}, e0)
+        f := delaunay.createFace(v.Vector{-1,-1,-1}, e0)
         delaunay.Edges[e0].FFace = f
         delaunay.Edges[e1].FFace = f
 
@@ -1082,8 +1084,6 @@ func extendByPoint(frontier *s.SkipList, p DelaunayPoint, delaunay *Delaunay, ce
 
     frontierItemValue := frontierItem.GetValue().(FrontElement)
 
-
-
     vi := delaunay.createVertex(p.Point)
 
     existingE := frontierItemValue.EdgeIndex
@@ -1109,7 +1109,7 @@ func extendByPoint(frontier *s.SkipList, p DelaunayPoint, delaunay *Delaunay, ce
 
     //fi1 := delaunay.Edges[existingE].FFace
 
-    fi1 := delaunay.createFace(v.Vector{}, existingE)
+    fi1 := delaunay.createFace(v.Vector{-1,-1,-1}, existingE)
     delaunay.Edges[existingE].FFace = fi1
 
     twinV := delaunay.Edges[delaunay.Edges[existingE].ETwin].VOrigin
@@ -1128,13 +1128,16 @@ func extendByPoint(frontier *s.SkipList, p DelaunayPoint, delaunay *Delaunay, ce
     delaunay.Edges[ej1].ETwin = ej2
 
     delaunay.Edges[ei1].ENext = ej1
+    delaunay.Edges[existingE].EPrev = ej1
+
 
     // If we hit a vertex directly, we have to create a second triangle to the left as well so we don't have duplicate
     // keys in our frontier data structure!
     if hitVertex {
+
         prevVertex := delaunay.Edges[nextLeafV.EdgeIndex].VOrigin
 
-        fj2 := delaunay.createFace(v.Vector{}, ej2)
+        fj2 := delaunay.createFace(v.Vector{-1,-1,-1}, ej2)
         delaunay.Edges[ej2].FFace = fj2
 
         ek1 := delaunay.createEdge(vi, he.EmptyEdge, ej2, nextLeafV.EdgeIndex, fj2, v.Edge{})
@@ -1235,10 +1238,11 @@ func (delaunay *Delaunay)triangulatePoints(pl *DelaunayPointList, frontier *s.Sk
     // Finalization step so we have a valid convex hull afterwards!
     f := frontier.GetLargestNode()
     fV := f.GetValue().(FrontElement)
+
     prev := frontier.Prev(f)
     prevV := prev.GetValue().(FrontElement)
 
-    for fV.PolarAngle > prevV.PolarAngle {
+    for fV.PolarAngle >= prevV.PolarAngle {
         frontierVertex := delaunay.Edges[prevV.EdgeIndex].VOrigin
         createConsecutiveTrianglesRight(frontier, delaunay, frontierVertex, f, 180)
 
@@ -1247,9 +1251,11 @@ func (delaunay *Delaunay)triangulatePoints(pl *DelaunayPointList, frontier *s.Sk
         prev = frontier.Prev(f)
         prevV  = prev.GetValue().(FrontElement)
     }
-
-
-
+    // Just to fill the gap from the last to the first vertex.
+    // Todo: This could be make more general by changing the condition of the loop.
+    // but the first attempts didn't quite work so I'll leave it here for the moment.
+    frontierVertex := delaunay.Edges[prevV.EdgeIndex].VOrigin
+    createConsecutiveTrianglesRight(frontier, delaunay, frontierVertex, f, 180)
 
 }
 
@@ -1257,7 +1263,7 @@ func TriangulateMultithreaded(pointList v.PointList, threadCount int) Delaunay {
 
     dPointList := preparePointList(&pointList, threadCount)
     //defer fmt.Printf("point to be inserted last: %v\n", dPointList.Points[52])
-    //dPointList.Points = dPointList.Points[:15]
+    //dPointList.Points = dPointList.Points[:7]
 
     //fmt.Printf("Center: %v\n", dPointList.Origin)
 
