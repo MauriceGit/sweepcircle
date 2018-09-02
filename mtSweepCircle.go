@@ -1009,10 +1009,325 @@ func (d *Delaunay) ExtractEdgeList() []SimpleEdge {
 	return edges
 }
 
+// List of points that represent the convex hull.
 func (d *Delaunay) ExtractConvexHull() ConvexHull {
-	return nil
+
+	ch := ConvexHull{}
+
+	largest := d.frontier.GetLargestNode()
+
+	node := d.frontier.GetSmallestNode()
+	for node != largest {
+		e := node.GetValue().(FrontElement).EdgeIndex
+		ch = append(ch, d.Vertices[d.Edges[e].VOrigin].Pos)
+
+		node = d.frontier.Next(node)
+	}
+
+	e := largest.GetValue().(FrontElement).EdgeIndex
+	ch = append(ch, d.Vertices[d.Edges[e].VOrigin].Pos)
+
+	return ch
+
+}
+
+// The logged edge MUST be the one, that is NOT yet finished.
+// A triangle will always come in through one edge, leave through a second. There is ALWAYS ONE edge unfinished!
+type UnfinishedTriangle struct {
+	// Points to an edge inside the Delaunay!
+	openEdge he.EdgeIndex
+
+	// Points to an edge inside the Voronoi!
+	incomingEdge he.EdgeIndex
+}
+
+// Expects an Inner edge! Not the outward facing one!
+func calcPerpendicularBisector(d *Delaunay, e he.EdgeIndex) v.Edge {
+	p1 := d.Vertices[d.Edges[e].VOrigin].Pos
+	p2 := d.Vertices[d.Edges[d.Edges[e].ETwin].VOrigin].Pos
+
+	diff := v.Sub(p2, p1)
+	z := v.Vector{0, 0, 1}
+	cross := v.Cross(diff, z)
+	diff = v.Mult(diff, 0.5)
+	middle := v.Add(p1, diff)
+	newPoint := v.Add(middle, cross)
+	dir := v.Sub(middle, newPoint)
+	return v.Edge{
+		Pos: middle,
+		Dir: dir,
+	}
+}
+
+func intoNirvana(d *Delaunay, e he.EdgeIndex) bool {
+	return d.Edges[e].ENext == he.EmptyEdge
+}
+
+// Thanks to Paul Draper at
+// http://stackoverflow.com/questions/20677795/find-the-point-of-intersecting-lines
+func calculateVertexPosition(e1, e2 v.Edge) v.Vector {
+	p12 := v.Add(e1.Pos, e1.Dir)
+	p22 := v.Add(e2.Pos, e2.Dir)
+
+	xdiff := v.Vector{e1.Pos.X - p12.X, e2.Pos.X - p22.X, 0}
+	ydiff := v.Vector{e1.Pos.Y - p12.Y, e2.Pos.Y - p22.Y, 0}
+
+	det2D := func(a, b v.Vector) float64 {
+		return a.X*b.Y - a.Y*b.X
+	}
+
+	div := det2D(xdiff, ydiff)
+	if math.Abs(div) <= EPS {
+		fmt.Printf("Lines do not intersect!\n")
+		return v.Vector{}
+	}
+
+	d := v.Vector{det2D(e1.Pos, p12), det2D(e2.Pos, p22), 0}
+	x := det2D(d, xdiff) / div
+	y := det2D(d, ydiff) / div
+	return v.Vector{x, y, 0}
+
 }
 
 func (d *Delaunay) CreateVoronoi() Voronoi {
-	return Voronoi{}
+	emptyT := UnfinishedTriangle{-1, -1}
+
+	// The data structure is identical. So we create this Delaunay struct and cast it to Voronoi on return.
+	// So we can use the corresponding methods.
+	edgeCount := (3*len(d.Vertices) - 6) * 2
+	v := Delaunay{
+		Vertices:           make([]he.HEVertex, (edgeCount+6)/3),
+		firstFreeVertexPos: 0,
+		Edges:              make([]he.HEEdge, edgeCount),
+		firstFreeEdgePos:   0,
+		Faces:              make([]he.HEFace, len(d.Vertices)),
+		firstFreeFacePos:   0,
+	}
+
+	backlog := []UnfinishedTriangle{}
+
+	outerE := d.frontier.GetSmallestNode().GetValue().(FrontElement).EdgeIndex
+	innerE := d.Edges[outerE].ETwin
+
+	//leftFace := v.createFace(d.Vertices[d.Edges[innerE].VOrigin].Pos, he.EmptyEdge)
+	rightFace := v.createFace(d.Vertices[d.Edges[outerE].VOrigin].Pos, he.EmptyEdge)
+
+	perpendicularBisector := calcPerpendicularBisector(d, innerE)
+	e := v.createEdge(he.EmptyVertex, he.EmptyEdge, he.EmptyEdge, he.EmptyEdge, he.EmptyFace, perpendicularBisector)
+	eT := v.createEdge(he.EmptyVertex, e, he.EmptyEdge, he.EmptyEdge, rightFace, perpendicularBisector)
+	v.Edges[e].ETwin = eT
+
+	//v.Faces[leftFace].EEdge = e
+	v.Faces[rightFace].EEdge = eT
+
+	active := UnfinishedTriangle{
+		// An Edge of the original Delaunay.
+		openEdge: d.Edges[innerE].EPrev,
+		// An Edge already from the new Voronoi.
+		incomingEdge: e,
+	}
+
+	//backlog = append(backlog, active)
+	goRight := true
+
+	// We avoid recursion as for large Delaunays, we might exceed the stack limit!
+	for len(backlog) > 0 || active != emptyT {
+		fmt.Printf("- active: {openEdge: %v}, backlog: %v\n", active.openEdge, len(backlog))
+
+		for i := 0; i < len(backlog); i++ {
+			fmt.Printf("---> bl[%v]: %v\n", i, backlog[i])
+		}
+
+		goRight = true
+
+		// if active == EmptyT: Set active = backlog[-1]. Remove last backlog entry. This is equivalent to going left instead of right.
+		// active will be empty, when we leave the triangulation
+		if active == emptyT {
+			active = backlog[len(backlog)-1]
+			backlog = backlog[:len(backlog)-1]
+			goRight = false
+			fmt.Printf("  --> active item from backlog - %v\n", len(backlog))
+		}
+
+		// goRight means, that we are not using a backlog item.
+		if goRight {
+
+			fmt.Printf("  Go right.\n")
+
+			// Make the edge to the triangle at the right side!
+			entryEdge := d.Edges[active.openEdge].EPrev
+			perpendicularBisector := calcPerpendicularBisector(d, entryEdge)
+
+			vPos := calculateVertexPosition(v.Edges[active.incomingEdge].TmpEdge, perpendicularBisector)
+
+			// We have to create the corresponding vertex!
+			vertex := v.createVertex(vPos)
+
+			inTwin := v.Edges[active.incomingEdge].ETwin
+
+			//toLeftFace := v.createFace(d.Vertices[d.Edges[d.Edges[active.openEdge].ETwin].VOrigin].Pos, he.EmptyEdge)
+
+			e := v.createEdge(vertex, he.EmptyEdge, he.EmptyEdge, he.EmptyEdge, v.Edges[inTwin].FFace, perpendicularBisector)
+			eT := v.createEdge(he.EmptyVertex, e, he.EmptyEdge, inTwin, he.EmptyFace, perpendicularBisector)
+			v.Edges[e].ETwin = eT
+
+			//v.Faces[toLeftFace].EEdge = e
+
+			// Make the connection on the last edge as well. Vertex + next/prev.
+			v.Edges[inTwin].VOrigin = vertex
+			v.Edges[inTwin].EPrev = eT
+
+			//toRightEdge := d.Edges[entryEdge].ENext
+
+			// Create backlog to the left from where we just create the edge from.
+			backlog = append(backlog, active)
+
+			// If the edge is going into the nirvana, continue and don't set a new backlog item in that direction.
+			if intoNirvana(d, d.Edges[entryEdge].ETwin) {
+
+				// Set face reference to first edge.
+				v.Faces[v.Edges[e].FFace].EEdge = e
+
+				f := v.createFace(d.Vertices[d.Edges[active.openEdge].VOrigin].Pos, eT)
+				v.Edges[eT].FFace = f
+
+				fmt.Printf("  Into nirvana.\n")
+				active = emptyT
+				continue
+			}
+
+			// Set the new active to the next triangle.
+			nextTriangleLeftEdge := d.Edges[d.Edges[entryEdge].ETwin].EPrev
+			active = UnfinishedTriangle{
+				openEdge:     nextTriangleLeftEdge,
+				incomingEdge: e,
+			}
+
+		} else {
+
+			fmt.Printf("  Go left.\n")
+
+			otherIncomingEdge := he.EmptyEdge
+			// Back to the start
+			if d.Edges[d.Edges[active.openEdge].ETwin].ENext == d.Edges[backlog[0].openEdge].ETwin {
+				fmt.Printf("  Connect to first from backlog\n")
+				otherIncomingEdge = backlog[0].incomingEdge
+				backlog = backlog[1:]
+			} else {
+				// Make sure, we don't have the first AND the last matching and remove an element too much!
+				// Close the previous polygon
+				//if d.Edges[d.Edges[active.openEdge].ETwin].ENext == d.Edges[backlog[len(backlog)-1].openEdge].ETwin {
+				//	fmt.Printf("  Connect to last from backlog\n")
+				//	otherIncomingEdge = backlog[len(backlog)-1].incomingEdge
+				//	backlog = backlog[:len(backlog)-1]
+				//}
+			}
+
+			// Just connect the edges and vertices and we're done!
+			if otherIncomingEdge != he.EmptyEdge {
+
+				vPos := calculateVertexPosition(v.Edges[active.incomingEdge].TmpEdge, v.Edges[otherIncomingEdge].TmpEdge)
+
+				twin := v.Edges[active.incomingEdge].ETwin
+				otherTwin := v.Edges[otherIncomingEdge].ETwin
+
+				vertex := v.createVertex(vPos)
+
+				v.Edges[twin].VOrigin = vertex
+				v.Edges[otherTwin].VOrigin = vertex
+
+				v.Edges[otherIncomingEdge].ENext = twin
+				v.Edges[twin].EPrev = otherIncomingEdge
+
+				leftFace := v.createFace(d.Vertices[d.Edges[d.Edges[active.openEdge].ETwin].VOrigin].Pos, active.incomingEdge)
+				v.Faces[leftFace].EEdge = active.incomingEdge
+
+				e := v.Edges[active.incomingEdge].ENext
+				for e != he.EmptyEdge && e != active.incomingEdge {
+					v.Edges[e].FFace = leftFace
+					e = v.Edges[e].ENext
+				}
+
+				e = v.Edges[twin].EPrev
+				for e != he.EmptyEdge && e != twin && v.Edges[e].FFace == he.EmptyFace {
+					v.Edges[e].FFace = v.Edges[twin].FFace
+				}
+
+				// TODO: Check in a better way please... But... It's happening only once anyway..
+				if len(backlog) == 1 && d.Edges[d.Edges[active.openEdge].ETwin].EPrev == d.Edges[backlog[0].openEdge].ETwin {
+					lastIncomingEdge := backlog[0].incomingEdge
+					lastTwin := v.Edges[lastIncomingEdge].ETwin
+					backlog = backlog[1:]
+
+					fmt.Printf("  Connect to last edge.\n")
+
+					v.Edges[lastTwin].VOrigin = vertex
+
+					v.Edges[active.incomingEdge].ENext = lastTwin
+					v.Edges[lastTwin].EPrev = active.incomingEdge
+
+					v.Edges[lastIncomingEdge].ENext = otherTwin
+					v.Edges[otherTwin].EPrev = lastIncomingEdge
+
+				} else {
+
+					toLeftEdge := d.Edges[d.Edges[active.openEdge].ETwin].EPrev
+					perpendicularBisector := calcPerpendicularBisector(d, toLeftEdge)
+
+					e := v.createEdge(vertex, he.EmptyEdge, active.incomingEdge, he.EmptyEdge, v.Edges[active.incomingEdge].FFace, perpendicularBisector)
+					eT := v.createEdge(he.EmptyVertex, e, he.EmptyEdge, otherTwin, v.Edges[otherTwin].FFace, perpendicularBisector)
+					v.Edges[e].ETwin = eT
+
+					blItem := UnfinishedTriangle{
+						openEdge:     toLeftEdge,
+						incomingEdge: e,
+					}
+
+					backlog = append(backlog, blItem)
+				}
+
+				active = emptyT
+			} else {
+
+				// Create a normal open edge to the next triangle and create an active item, because we are from now on on the right track again (Right)
+
+				// Make the edge to the triangle at the right side!
+				toLeftEdge := d.Edges[d.Edges[active.openEdge].ETwin].EPrev
+				perpendicularBisector := calcPerpendicularBisector(d, toLeftEdge)
+
+				twin := v.Edges[active.incomingEdge].ETwin
+				vertex := v.Edges[twin].VOrigin
+
+				otherTwin := v.Edges[v.Edges[twin].EPrev].ETwin
+
+				e := v.createEdge(vertex, he.EmptyEdge, active.incomingEdge, he.EmptyEdge, v.Edges[active.incomingEdge].FFace, perpendicularBisector)
+				eT := v.createEdge(he.EmptyVertex, e, he.EmptyEdge, otherTwin, v.Edges[otherTwin].FFace, perpendicularBisector)
+				v.Edges[e].ETwin = eT
+
+				v.Edges[active.incomingEdge].ENext = e
+				v.Edges[otherTwin].EPrev = eT
+
+				// If the edge is going into the nirvana, continue and don't set a new backlog item in that direction.
+				if intoNirvana(d, d.Edges[toLeftEdge].ETwin) {
+
+					v.Faces[v.Edges[eT].FFace].EEdge = eT
+
+					active = emptyT
+					continue
+				}
+
+				// Set the new active to the next triangle.
+				active = UnfinishedTriangle{
+					openEdge:     toLeftEdge,
+					incomingEdge: e,
+				}
+			}
+
+		}
+
+		// If we finished a polygon (last two ifs), create Face with position at vertex and let all edges point to this face.
+
+	}
+
+	return Voronoi(v)
 }
