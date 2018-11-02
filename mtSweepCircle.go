@@ -1102,6 +1102,10 @@ func (v *Delaunay) connectToExistingVoronoi(d *Delaunay, outgoingEdges [][]he.Ed
 		e1T := v.createEdge(he.EmptyVertex, e1, he.EmptyEdge, e3, he.EmptyFace, b1)
 		v.Edges[e1].ETwin = e1T
 		v.Edges[e3].EPrev = e1T
+
+		// The incoming edge (just created) will be the reference for the face per definition (first edge in incomplete polygon!)
+		v.Faces[d.Edges[de1].VOrigin].EEdge = e1T
+
 	} else {
 		// If f1 is smaller than the current face we are iterating, we already created all outgoing edges for this triangle. Meaning, we can just connect!
 		if f1 < df {
@@ -1154,6 +1158,12 @@ func (d *Delaunay) CreateVoronoi() Voronoi {
 	// Temporary slice of the three outgoing edges for each delaunay face for fast voronoi edge lookup
 	outgoingEdges := make([][]he.EdgeIndex, len(d.Faces))
 
+	// Create all Voronoi faces beforehand at the position of the Delaunay vertex. The connection to the edges will be added later.
+	// The index of the Voronoi faces will correspond to the index Delaunay vertices.
+	for _, dv := range d.Vertices {
+		v.createFace(dv.Pos, he.EmptyEdge)
+	}
+
 	// Iterate over all Delaunay Faces. All Delaunay triangles have exactly three edges!
 	for i, df := range d.Faces {
 		de1 := df.EEdge
@@ -1167,9 +1177,21 @@ func (d *Delaunay) CreateVoronoi() Voronoi {
 		newVertex := v.createVertex(newVertexPos)
 
 		// Create three outgoing voronoi edges perpendicular to the delaunay edges of the triangle
-		e1 := v.createEdge(newVertex, he.EmptyEdge, he.EmptyEdge, he.EmptyEdge, he.EmptyFace, b1)
-		e2 := v.createEdge(newVertex, he.EmptyEdge, he.EmptyEdge, he.EmptyEdge, he.EmptyFace, b2)
-		e3 := v.createEdge(newVertex, he.EmptyEdge, he.EmptyEdge, he.EmptyEdge, he.EmptyFace, b3)
+		// Face: Instead of calculating d1.twin.origin we can just take d2.origin for the same result!
+		e1 := v.createEdge(newVertex, he.EmptyEdge, he.EmptyEdge, he.EmptyEdge, he.FaceIndex(d.Edges[de2].VOrigin), b1)
+		e2 := v.createEdge(newVertex, he.EmptyEdge, he.EmptyEdge, he.EmptyEdge, he.FaceIndex(d.Edges[de3].VOrigin), b2)
+		e3 := v.createEdge(newVertex, he.EmptyEdge, he.EmptyEdge, he.EmptyEdge, he.FaceIndex(d.Edges[de1].VOrigin), b3)
+
+		// Assign the edge reference for a face (if not already done!)
+		if v.Faces[d.Edges[de1].VOrigin].EEdge == he.EmptyEdge {
+			v.Faces[d.Edges[de1].VOrigin].EEdge = e3
+		}
+		if v.Faces[d.Edges[de2].VOrigin].EEdge == he.EmptyEdge {
+			v.Faces[d.Edges[de2].VOrigin].EEdge = e1
+		}
+		if v.Faces[d.Edges[de3].VOrigin].EEdge == he.EmptyEdge {
+			v.Faces[d.Edges[de3].VOrigin].EEdge = e2
+		}
 
 		v.connectToExistingVoronoi(d, outgoingEdges, de1, e1, e2, e3, b1, b2, b3, he.FaceIndex(i))
 		v.connectToExistingVoronoi(d, outgoingEdges, de2, e2, e3, e1, b2, b3, b1, he.FaceIndex(i))
