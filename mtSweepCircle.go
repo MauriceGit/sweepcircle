@@ -1093,13 +1093,96 @@ func calculateVertexPosition(e1, e2 v.Edge) v.Vector {
 
 }
 
+// Verifies that the Voronoi is not corrupted or has miscalculated edges/faces
+// or any other unvalid stuff.
+func (v *Voronoi) Verify() error {
+
+	for i, e := range v.Edges {
+		if e != EmptyE {
+
+			// Every valid edge MUST have a valid Twin edge!
+			if e.ETwin == he.EmptyEdge || v.Edges[e.ETwin] == EmptyE {
+				return errors.New(fmt.Sprintf("Edge %v: %v has an invalid twin edge", i, e))
+			}
+
+			// Twins must refer to each other!
+			if i != int(v.Edges[e.ETwin].ETwin) {
+				return errors.New(fmt.Sprintf("Edge %v and his Twin %v don't refer to each other", i, e.ETwin))
+			}
+
+			// Check if the origin vertex is valid (if there is one)
+			if e.VOrigin != he.EmptyVertex && v.Vertices[e.VOrigin] == EmptyV {
+				return errors.New(fmt.Sprintf("Origin vertex of edge %v: %v is invalid", i, e))
+			}
+
+			// Check, if the face is valid (if defined)
+			if e.FFace == he.EmptyFace || v.Faces[e.FFace] == EmptyF {
+				return errors.New(fmt.Sprintf("Face of edge %v: %v is invalid", i, e.FFace))
+			}
+
+			// Check, if the next edge is valid
+			if e.ENext != he.EmptyEdge && v.Edges[e.ENext] == EmptyE {
+				return errors.New(fmt.Sprintf("Next edge for edge %v: %v is invalid", i, e))
+			}
+
+			// Check, if the prev edge is valid
+			if e.EPrev != he.EmptyEdge && v.Edges[e.EPrev] == EmptyE {
+				return errors.New(fmt.Sprintf("Prev edge for edge %v: %v is invalid", i, e))
+			}
+
+			// If this->next is not empty, the next one must have a previous edge.
+			if e.ENext != he.EmptyEdge && v.Edges[e.ENext].EPrev == he.EmptyEdge {
+				return errors.New(fmt.Sprintf("Next edge for edge %v must have a non-empty prev", i))
+			}
+
+			// The this edge must correspond to the next->prev edge
+			if e.ENext != he.EmptyEdge && v.Edges[e.ENext].EPrev != he.EmptyEdge && v.Edges[e.ENext].EPrev != he.EdgeIndex(i) {
+				return errors.New(fmt.Sprintf("The edge %v has %v as next edge, which has %v as his previous. They must reference each other!", i, e.ENext, v.Edges[e.ENext].EPrev))
+			}
+		}
+	}
+
+	for i, f := range v.Faces {
+		if f != EmptyF {
+
+			// Check for valid EEdge
+			if f.EEdge == he.EmptyEdge || v.Edges[f.EEdge] == EmptyE {
+				return errors.New(fmt.Sprintf("Face %v: %v points to invalid edge", i, f))
+			}
+
+			// If the edge is the first one (no/infinite start-vertex), it's all good.
+			// Otherwise check, that the edges actually go all the way around the face!
+			startEdge := f.EEdge
+			e := v.Edges[startEdge].ENext
+
+			for e != he.EmptyEdge && e != startEdge {
+
+				if v.Edges[e].FFace != he.FaceIndex(i) {
+					return errors.New(fmt.Sprintf("Edge %v of the face %v: %v does not point to the right face!", e, i, f))
+				}
+
+				e = v.Edges[e].ENext
+			}
+
+			if e != startEdge && v.Edges[startEdge].EPrev != he.EmptyEdge {
+				return errors.New(fmt.Sprintf("Edge %v does not correctly loop around face %v (All around, it should point to edge: %v)", e, f, startEdge))
+			}
+
+		}
+	}
+
+	return nil
+}
+
 // The v is actually the Voronoi not Delaunay. But before casting.
 func (v *Delaunay) connectToExistingVoronoi(d *Delaunay, outgoingEdges [][]he.EdgeIndex, de1, e1, e2, e3 he.EdgeIndex, b1, b2, b3 v.Edge, df he.FaceIndex) {
 
 	// If there is no neighboring triangle/face, we are at the outer bounds
 	f1 := d.Edges[d.Edges[de1].ETwin].FFace
 	if f1 == he.EmptyFace {
-		e1T := v.createEdge(he.EmptyVertex, e1, he.EmptyEdge, e3, he.EmptyFace, b1)
+		// Again: Because we create all the Voronoi faces in a loop at the beginning with the Delaunay Vertices as reference (position),
+		// the Delaunay vertex ids correspond to the Voronoi face ids! So we can just use them where we know it fits.
+		e1T := v.createEdge(he.EmptyVertex, e1, he.EmptyEdge, e3, he.FaceIndex(d.Edges[de1].VOrigin), b1)
 		v.Edges[e1].ETwin = e1T
 		v.Edges[e3].EPrev = e1T
 
@@ -1166,6 +1249,11 @@ func (d *Delaunay) CreateVoronoi() Voronoi {
 
 	// Iterate over all Delaunay Faces. All Delaunay triangles have exactly three edges!
 	for i, df := range d.Faces {
+
+		if df == EmptyF {
+			break
+		}
+
 		de1 := df.EEdge
 		de2 := d.Edges[de1].ENext
 		de3 := d.Edges[de2].ENext
@@ -1205,5 +1293,11 @@ func (d *Delaunay) CreateVoronoi() Voronoi {
 
 	}
 
-	return Voronoi(v)
+	realV := Voronoi(v)
+
+	if e := realV.Verify(); e != nil {
+		fmt.Println(e)
+	}
+
+	return realV
 }
