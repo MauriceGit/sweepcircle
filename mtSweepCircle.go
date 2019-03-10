@@ -986,6 +986,17 @@ func TriangulateMultithreaded(pointList v.PointList, threadCount int) Delaunay {
 
 	delaunay.triangulatePoints(&dPointList)
 
+	delaunay.Edges = append([]HEEdge{}, delaunay.Edges[:delaunay.firstFreeEdgePos]...)
+	delaunay.Vertices = append([]HEVertex{}, delaunay.Vertices[:delaunay.firstFreeVertexPos]...)
+	delaunay.Faces = append([]HEFace{}, delaunay.Faces[:delaunay.firstFreeFacePos]...)
+
+	//fmt.Printf("edges len: %d, cap: %v\n", cap(delaunay.Edges), len(delaunay.Edges))
+
+	//newEdges := make([]HEEdge, delaunay.firstFreeEdgePos, delaunay.firstFreeEdgePos)
+	//copied := copy(newEdges, delaunay.Edges)
+	//fmt.Printf("edges copied: %d. Planned to copy: %d\n", copied, delaunay.firstFreeEdgePos)
+	//delaunay.Edges = newEdges
+
 	return delaunay
 
 }
@@ -1299,6 +1310,10 @@ func (d *Delaunay) CreateVoronoi() Voronoi {
 	}
 
 	realV := Voronoi(v)
+
+	realV.Edges = append([]HEEdge{}, realV.Edges[:realV.firstFreeEdgePos]...)
+	realV.Vertices = append([]HEVertex{}, realV.Vertices[:realV.firstFreeVertexPos]...)
+	realV.Faces = append([]HEFace{}, realV.Faces[:realV.firstFreeFacePos]...)
 
 	//if e := realV.Verify(); e != nil {
 	//	fmt.Println(e)
