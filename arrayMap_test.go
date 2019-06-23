@@ -10,7 +10,7 @@ import (
 )
 
 const (
-	maxN = 10
+	maxN = 2000000
 )
 
 // timeTrack will print out the number of nanoseconds since the start time divided by n
@@ -21,11 +21,15 @@ func timeTrack(start time.Time, n int, name string) {
 }
 
 func TestInsertAndFind(t *testing.T) {
-	
+
+	epsilon := math.Nextafter(1, 2) - 1
 	toKey := func(e int) float64 {
-		return float64(e)/float64(maxN)*2.*math.Pi
+		return float64(e) / float64(maxN) * 2. * math.Pi
 	}
-	
+	toKeyF := func(e float64) float64 {
+		return e * 2. * math.Pi
+	}
+
 	list := NewArrayMap(int(math.Sqrt(float64(maxN))))
 
 	if !list.IsEmpty() {
@@ -38,125 +42,90 @@ func TestInsertAndFind(t *testing.T) {
 	for i := 0; i < maxN; i++ {
 		last = list.InsertAfter(FrontElement{PolarAngle: toKey(i)}, last)
 	}
-	
-	fmt.Println(list)
-	
+
+	//fmt.Println(list)
+
 	for i := 0; i < maxN; i++ {
-		if e := list.FindGreaterOrEqual(toKey(i)); math.Abs(e.Value.PolarAngle - toKey(i)) > 0.00001 {
+		if e := list.FindGreaterOrEqual(toKey(i)); math.Abs(e.Value.PolarAngle-toKey(i)) > epsilon {
 			fmt.Printf("Fail to find an element. %.3f != %.3f\n", e.Value.PolarAngle, toKey(i))
 			t.Fail()
 		}
 	}
-	
-	//fmt.Println(list)
-	
-	
 
-	list = NewArrayMap(int(math.Sqrt(float64(maxN))))
+	//fmt.Println(list)
+	r := rand.New(rand.NewSource(9))
+
+	list = NewArrayMap(maxN)
 	// Test at random positions in the list.
-	rList := rand.Perm(maxN)
-	for _, e := range rList {
+	rList := r.Perm(maxN)
+	for i, e := range rList {
 		n := list.FindGreaterOrEqual(toKey(e))
 		var prev *List = nil
-		if n != nil {
+		if i != 0 {
 			prev = n.Prev
 		}
+
 		list.InsertAfter(FrontElement{PolarAngle: toKey(e)}, prev)
+
+		//fmt.Println(list)
 	}
-		
-	fmt.Println(list)
-	
+
 	for i, e := range rList {
-		
-		if v := list.FindGreaterOrEqual(toKey(e)); math.Abs(toKey(e) - v.Value.PolarAngle) >= 0.000001 {
+
+		if v := list.FindGreaterOrEqual(toKey(e)); math.Abs(toKey(e)-v.Value.PolarAngle) >= epsilon {
 			fmt.Printf("Fail to find an exact element at %v. %.3f != %.3f\n", i, toKey(e), v.Value.PolarAngle)
 			t.Fail()
 		}
 	}
-	
-	//rList = rand.Perm(maxN)
-	//for _, e := range rList {
-	//	n := list.FindGreaterOrEqual(toKey(e))
-	//	var prev *List = nil
-	//	if n != nil {
-	//		prev = n.Prev
-	//	}
-	//	inserted := list.InsertAfter(FrontElement{PolarAngle: toKey(e)}, prev)
-	//	
-	//	// Find the one we just inserted.
-	//	if v := list.FindGreaterOrEqual(toKey(e)); math.Abs(toKey(e) - v.Value.PolarAngle) >= 0.000001 {
-	//		fmt.Printf("Inserted element not found %v != %v\n", toKey(e), v.Value.PolarAngle)
-	//		t.Fail()
-	//	}
-	//	
-	//	list.Delete(inserted)
-	//	
-	//	// Find the one we just inserted.
-	//	if v := list.FindGreaterOrEqual(toKey(e)); math.Abs(toKey(e) - v.Value.PolarAngle) <= 0.00001 {
-	//		fmt.Printf("Element not correctly removed exact element %v != %v\n", toKey(e), v.Value.PolarAngle)
-	//		t.Fail()
-	//	}
-	//}
-	
+
+	//fmt.Println(list)
+
+	//fmt.Printf("find larger: %.3f\n", list.FindGreaterOrEqual(6).Value.PolarAngle)
+
+	sum := 0
+	for i := 0; i < len(list.lookup); i++ {
+		if list.lookup[i] != nil {
+			sum++
+		}
+	}
+	fmt.Printf("Lookup table: %v\n", sum)
+
+	r = rand.New(rand.NewSource(99))
+
+	for i := 0; i < maxN; i++ {
+		e := r.Float64()
+		n := list.FindGreaterOrEqual(toKeyF(e))
+		prev := n.Prev
+
+		//fmt.Printf("About to insert %.3f --> %.3f\n", e, toKeyF(e))
+		inserted := list.InsertAfter(FrontElement{PolarAngle: toKeyF(e)}, prev)
+
+		// Find the one we just inserted.
+		if v := list.FindGreaterOrEqual(toKeyF(e)); math.Abs(toKeyF(e)-v.Value.PolarAngle) >= epsilon {
+			fmt.Printf("Inserted element not found %v != %v\n", toKeyF(e), v.Value.PolarAngle)
+			t.Fail()
+		}
+
+		//fmt.Printf("Inserted: %.3f\n", inserted.Value.PolarAngle)
+		//fmt.Println(list)
+		list.Delete(inserted)
+		//fmt.Println(list)
+
+		// Find the one we just inserted.
+		if v := list.FindGreaterOrEqual(toKeyF(e)); math.Abs(toKeyF(e)-v.Value.PolarAngle) <= epsilon {
+			fmt.Printf("Element not correctly removed exact element %v != %v\n", toKeyF(e), v.Value.PolarAngle)
+			t.Fail()
+		}
+	}
+
+	sum = 0
+	for i := 0; i < len(list.lookup); i++ {
+		if list.lookup[i] != nil {
+			sum++
+		}
+	}
+	fmt.Printf("Lookup table: %v\n", sum)
+
+	//fmt.Println(list)
+
 }
-
-//func TestPrev(t *testing.T) {
-//	list := New()
-//
-//	for i := 0; i < maxN; i++ {
-//		list.Insert(FrontElement(i))
-//	}
-//
-//	smallest := list.GetSmallestNode()
-//	largest := list.GetLargestNode()
-//
-//	lastNode := largest
-//	node := lastNode
-//	for node != smallest {
-//		node = list.Prev(node)
-//		// Must always be incrementing here!
-//		if node.value.(FrontElement) >= lastNode.value.(FrontElement) {
-//			t.Fail()
-//		}
-//		// Next.Prev must always point to itself!
-//		if list.Prev(list.Next(node)) != node {
-//			t.Fail()
-//		}
-//		lastNode = node
-//	}
-//
-//	if list.Prev(smallest) != largest {
-//		t.Fail()
-//	}
-//}
-//
-//func TestNext(t *testing.T) {
-//	list := New()
-//
-//	for i := 0; i < maxN; i++ {
-//		list.Insert(FrontElement(i))
-//	}
-//
-//	smallest := list.GetSmallestNode()
-//	largest := list.GetLargestNode()
-//
-//	lastNode := smallest
-//	node := lastNode
-//	for node != largest {
-//		node = list.Next(node)
-//		// Must always be incrementing here!
-//		if node.value.(FrontElement) <= lastNode.value.(FrontElement) {
-//			t.Fail()
-//		}
-//		// Next.Prev must always point to itself!
-//		if list.Next(list.Prev(node)) != node {
-//			t.Fail()
-//		}
-//		lastNode = node
-//	}
-//
-//	if list.Next(largest) != smallest {
-//		t.Fail()
-//	}
-//}
-

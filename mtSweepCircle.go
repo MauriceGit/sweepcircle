@@ -489,7 +489,7 @@ func (d *Delaunay) initializeTriangulation(pl *DelaunayPointList) *ArrayMap {
 	pl.Points = pl.Points[3:]
 
 	//frontier := s.NewEps(0.000000001)
-	frontier := NewArrayMap(len(pl.Points))
+	frontier := NewArrayMap(int(math.Sqrt(float64(len(pl.Points)))))
 
 	//fmt.Printf("First three inserts: %v, %v, %v\n", f0, f1, f2)
 	n1 := frontier.InsertAfter(f0, nil)
@@ -686,7 +686,7 @@ func (d *Delaunay) createConsecutiveTrianglesRight(baseVertex VertexIndex, leafN
 
 		//d.frontier.ChangeValue(nextFrontier, FrontElement{eNew2, nextFrontierValue.PolarAngle, nextFrontierValue.Radius})
 		nextFrontier.Value.EdgeIndex = eNew2
-		
+
 		//fmt.Printf("%v --> %v\n", leafNode, leafNodeValue)
 		//d.frontier.Delete(leafNodeValue)
 		d.frontier.Delete(leafNode)
@@ -835,7 +835,7 @@ func extendByPoint(p DelaunayPoint, d *Delaunay, center v.Vector) {
 
 		//ok := d.frontier.ChangeValue(nextLeaf, FrontElement{ek2, nextLeafV.PolarAngle, nextLeafV.Radius})
 		nextLeaf.Value.EdgeIndex = ek2
-		
+
 		//ok = d.frontier.ChangeValue(frontierItem, FrontElement{ei2, frontierItemValue.PolarAngle, p.Distance})
 		frontierItem.Value.EdgeIndex = ei2
 		frontierItem.Value.Radius = p.Distance
@@ -847,10 +847,10 @@ func extendByPoint(p DelaunayPoint, d *Delaunay, center v.Vector) {
 	} else {
 		//ok := d.frontier.ChangeValue(frontierItem, FrontElement{ej2, frontierItemValue.PolarAngle, frontierItemValue.Radius})
 		frontierItem.Value.EdgeIndex = ej2
-		
+
 		//fmt.Printf("Insert: %v\n", FrontElement{ei2, p.PolarAngle, p.Distance})
 		//d.frontier.Insert(FrontElement{ei2, p.PolarAngle, p.Distance})
-		
+
 		d.frontier.InsertAfter(FrontElement{ei2, p.PolarAngle, p.Distance}, frontierItem.Prev)
 
 	}
@@ -915,8 +915,7 @@ func (d *Delaunay) triangulatePoints(pl *DelaunayPointList) {
 	//prev := d.frontier.Prev(f)
 	prev := f.Prev
 	prevV := prev.Value
-	
-	
+
 	frontierVertex := d.Edges[prevV.EdgeIndex].VOrigin
 	d.createConsecutiveTrianglesRight(frontierVertex, f, v.DegToRad(180))
 
@@ -926,7 +925,7 @@ func (d *Delaunay) triangulatePoints(pl *DelaunayPointList) {
 		fV = prevV
 		//prev = d.frontier.Prev(f)
 		prev = f.Prev
-		prevV = prev.Value		
+		prevV = prev.Value
 
 		frontierVertex = d.Edges[prevV.EdgeIndex].VOrigin
 		d.createConsecutiveTrianglesRight(frontierVertex, f, v.DegToRad(180))
@@ -941,13 +940,13 @@ func (d *Delaunay) triangulatePoints(pl *DelaunayPointList) {
 	prevV = prev.Value
 	frontierVertex = d.Edges[prevV.EdgeIndex].VOrigin
 	d.createConsecutiveTrianglesRight(frontierVertex, f, v.DegToRad(180))
-	
+
 }
 
 func TriangulateMultithreaded(pointList v.PointList, threadCount int) Delaunay {
 
 	if len(pointList) < 3 {
-		s := NewArrayMap(int(math.Abs(float64(len(pointList)))))
+		s := NewArrayMap(0)
 		return Delaunay{
 			Vertices:           []HEVertex{},
 			firstFreeVertexPos: 0,
@@ -989,11 +988,11 @@ func TriangulateMultithreaded(pointList v.PointList, threadCount int) Delaunay {
 	//delaunay.Edges = append([]HEEdge{}, delaunay.Edges[:delaunay.firstFreeEdgePos]...)
 	//delaunay.Vertices = append([]HEVertex{}, delaunay.Vertices[:delaunay.firstFreeVertexPos]...)
 	//delaunay.Faces = append([]HEFace{}, delaunay.Faces[:delaunay.firstFreeFacePos]...)
-	
+
 	delaunay.Edges = delaunay.Edges[:delaunay.firstFreeEdgePos]
 	delaunay.Vertices = delaunay.Vertices[:delaunay.firstFreeVertexPos]
 	delaunay.Faces = delaunay.Faces[:delaunay.firstFreeFacePos]
-	
+
 	//fmt.Printf("edges len: %d, cap: %v\n", cap(delaunay.Edges), len(delaunay.Edges))
 
 	//newEdges := make([]HEEdge, delaunay.firstFreeEdgePos, delaunay.firstFreeEdgePos)
