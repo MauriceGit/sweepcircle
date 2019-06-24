@@ -2,8 +2,7 @@ package mtSweepCircle
 
 import (
 	"fmt"
-
-	v "mtVector"
+	//v "mtVector"
 )
 
 // Just to make the code more readable.
@@ -27,7 +26,7 @@ var InfiniteVertex = VertexIndex(-2)
  */
 
 type HEVertex struct {
-	Pos v.Vector
+	Pos Vector
 }
 
 func (v VertexIndex) Valid() bool {
@@ -36,7 +35,7 @@ func (v VertexIndex) Valid() bool {
 
 type HEFace struct {
 	// Especially for Voronoi
-	ReferencePoint v.Vector
+	ReferencePoint Vector
 
 	// Points to an arbitrary edge of its polygon
 	// Only arbitrary for closed faces!!!!
@@ -56,12 +55,12 @@ type HEEdge struct {
 
 	// Iff VOrigin is NOT defined, an edge representation is required
 	// (general direction + some kind of starting point that is NOT an official HEVertex!)
-	TmpEdge v.Edge
+	TmpEdge Edge
 }
 
 // Todo but not important right now.
-func (f *HEFace) CalcNormal() v.Vector {
-	return v.Vector{}
+func (f *HEFace) CalcNormal() Vector {
+	return Vector{}
 }
 
 func (v HEVertex) String() string {
