@@ -9,6 +9,7 @@ type List struct {
 	Next  *List
 	Prev  *List
 	Value FrontElement
+	index int
 }
 
 // SkipList is the actual skiplist representation.
@@ -16,6 +17,15 @@ type List struct {
 type ArrayMap struct {
 	lookup []*List
 	list   *List
+
+	// Memory pool with List items
+	memPool []List
+	// Initial index, which item is the first one in the pool that is still free (will use them all up at least once)
+	initialPoolIndex int
+	// List of freed indices in the memPool. Those are the once that are recycled.
+	memPoolFreeIndices []int
+	// The last freed item will be reused immediately.
+	memPoolFreeIndicesIndex int
 }
 
 // New returns a new empty, initialized Skiplist.
@@ -24,12 +34,86 @@ func NewArrayMap(size int) *ArrayMap {
 	return &ArrayMap{
 		lookup: make([]*List, size, size),
 		list:   nil,
+
+		memPool:                 make([]List, size, size),
+		initialPoolIndex:        0,
+		memPoolFreeIndices:      make([]int, size, size),
+		memPoolFreeIndicesIndex: 0,
 	}
+}
+
+func (t *ArrayMap) newListElement() int {
+
+	if t.initialPoolIndex < len(t.memPool)-1 {
+		t.initialPoolIndex++
+		return t.initialPoolIndex - 1
+	} else {
+		// There are still items left to use...
+		if t.memPoolFreeIndicesIndex > 0 {
+			t.memPoolFreeIndicesIndex--
+			//return &t.memPool[t.memPoolFreeIndices[t.memPoolFreeIndicesIndex+1]]
+			return t.memPoolFreeIndices[t.memPoolFreeIndicesIndex+1]
+		} else {
+			// We have to resize the buffer because all items from the memory pool seem to be used and not getting recycled fast enough...
+			// Lets just add 100 new items for now.
+			t.memPool = append(t.memPool, make([]List, 5, 5)...)
+			t.memPoolFreeIndices = append(t.memPoolFreeIndices, make([]int, 5, 5)...)
+			t.initialPoolIndex++
+			return t.initialPoolIndex - 1
+		}
+	}
+
+}
+
+func (t *ArrayMap) recycleElement(l int) {
+	t.memPoolFreeIndicesIndex++
+	t.memPoolFreeIndices[t.memPoolFreeIndicesIndex] = l
 }
 
 // IsEmpty checks, if the skiplist is empty.
 func (t *ArrayMap) IsEmpty() bool {
 	return t.list == nil
+}
+
+// Insert inserts the given FrontElement into the skiplist.
+// Insert runs in approx. O(log(n))
+func (t *ArrayMap) InsertAfter(e FrontElement, prev *List) *List {
+
+	if prev != nil {
+		//fmt.Printf("    insert %.3f after %.3f\n", e.PolarAngle, prev.Value.PolarAngle)
+	}
+
+	//n := &List{nil, nil, e}
+	ni := t.newListElement()
+	n := &t.memPool[ni]
+	n.Value = e
+	n.index = ni
+
+	// Very first one
+	if prev == nil {
+		n.Prev = n
+		n.Next = n
+		t.list = n
+	} else {
+		n.Prev = prev
+		n.Next = prev.Next
+		prev.Next = n
+		n.Next.Prev = n
+
+		// New first element
+		if e.PolarAngle < prev.Value.PolarAngle {
+			t.list = n
+		}
+	}
+
+	//fmt.Printf("%v\n", t.list)
+	//fmt.Printf("Angle: %.2f, len: %v\n", e.PolarAngle, len(t.lookup))
+	//fmt.Printf("    Insert %.2f at index %v\n", e.PolarAngle, int(e.PolarAngle * 0.159154943 * float64(len(t.lookup))))
+
+	// 1 / (2*pi)
+	t.lookup[int(e.PolarAngle*0.159154943*float64(len(t.lookup)))] = n
+
+	return n
 }
 
 // FindGreaterOrEqual finds the first element, that is greater or equal to the given FrontElement e.
@@ -130,43 +214,7 @@ func (t *ArrayMap) Delete(n *List) {
 
 	n.Next = nil
 	n.Prev = nil
-}
-
-// Insert inserts the given FrontElement into the skiplist.
-// Insert runs in approx. O(log(n))
-func (t *ArrayMap) InsertAfter(e FrontElement, prev *List) *List {
-
-	if prev != nil {
-		//fmt.Printf("    insert %.3f after %.3f\n", e.PolarAngle, prev.Value.PolarAngle)
-	}
-
-	n := &List{nil, nil, e}
-
-	// Very first one
-	if prev == nil {
-		n.Prev = n
-		n.Next = n
-		t.list = n
-	} else {
-		n.Prev = prev
-		n.Next = prev.Next
-		prev.Next = n
-		n.Next.Prev = n
-
-		// New first element
-		if e.PolarAngle < prev.Value.PolarAngle {
-			t.list = n
-		}
-	}
-
-	//fmt.Printf("%v\n", t.list)
-	//fmt.Printf("Angle: %.2f, len: %v\n", e.PolarAngle, len(t.lookup))
-	//fmt.Printf("    Insert %.2f at index %v\n", e.PolarAngle, int(e.PolarAngle * 0.159154943 * float64(len(t.lookup))))
-
-	// 1 / (2*pi)
-	t.lookup[int(e.PolarAngle*0.159154943*float64(len(t.lookup)))] = n
-
-	return n
+	t.recycleElement(n.index)
 }
 
 // GetSmallestNode returns the very first/smallest node in the skiplist.
