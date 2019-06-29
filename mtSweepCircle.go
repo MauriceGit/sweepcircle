@@ -28,6 +28,8 @@ type Delaunay struct {
 	Faces              []HEFace
 	firstFreeFacePos   FaceIndex
 	frontier           *ArrayMap
+
+	edgeMemPool []HEEdge
 }
 
 type Voronoi Delaunay
@@ -247,43 +249,34 @@ func (d *Delaunay) Verify() error {
 	return nil
 }
 
-// So we can get a pointer of some data structure? What about scope issues?
 func (d *Delaunay) createFace(refPoint Vector, eEdge EdgeIndex) FaceIndex {
-	d.Faces[d.firstFreeFacePos] = HEFace{
-		ReferencePoint: refPoint,
-		EEdge:          eEdge,
-	}
+
+	d.Faces[d.firstFreeFacePos].ReferencePoint = refPoint
+	d.Faces[d.firstFreeFacePos].EEdge = eEdge
+
 	d.firstFreeFacePos += 1
 	return d.firstFreeFacePos - 1
 }
 
-// So we can get a pointer of some data structure? What about scope issues?
 func (d *Delaunay) createEdge(vOrigin VertexIndex, eTwin, ePrev, eNext EdgeIndex, fFace FaceIndex, tmpEdge Edge) EdgeIndex {
 
-	index := d.firstFreeEdgePos
-	d.firstFreeEdgePos += 1
+	d.Edges[d.firstFreeEdgePos].VOrigin = vOrigin
+	d.Edges[d.firstFreeEdgePos].ETwin = eTwin
+	d.Edges[d.firstFreeEdgePos].ENext = eNext
+	d.Edges[d.firstFreeEdgePos].EPrev = ePrev
+	d.Edges[d.firstFreeEdgePos].FFace = fFace
+	d.Edges[d.firstFreeEdgePos].TmpEdge = tmpEdge
 
-	d.Edges[index] = HEEdge{
-		VOrigin: vOrigin,
-		ETwin:   eTwin,
-		ENext:   eNext,
-		EPrev:   ePrev,
-		FFace:   fFace,
-		TmpEdge: tmpEdge,
-	}
-	return index
+	d.firstFreeEdgePos += 1
+	return d.firstFreeEdgePos - 1
 }
 
-// So we can get a pointer of some data structure? What about scope issues?
 func (d *Delaunay) createVertex(pos Vector) VertexIndex {
-	index := d.firstFreeVertexPos
+
+	d.Vertices[d.firstFreeVertexPos].Pos = pos
+
 	d.firstFreeVertexPos += 1
-
-	d.Vertices[index] = HEVertex{
-		Pos: pos,
-	}
-
-	return index
+	return d.firstFreeVertexPos - 1
 }
 
 func calcPolarAngle(p Vector, origin Vector) float64 {
@@ -303,17 +296,17 @@ func calcPolarAngle(p Vector, origin Vector) float64 {
 	return angle
 }
 
-func preparePointList(points *PointList, threadCount int) DelaunayPointList {
+func preparePointList(points []Vector, threadCount int) DelaunayPointList {
 	var dPointList DelaunayPointList
 
-	dPointList.Points = make([]DelaunayPoint, points.Len(), points.Len())
+	dPointList.Points = make([]DelaunayPoint, len(points), len(points))
 
 	// We cannot calculate the origin in the same loop as the distance, as distance depends on the final origin...
 	origin := Vector{}
-	for _, p := range *points {
+	for _, p := range points {
 		origin.Add(p)
 	}
-	origin.Div(float64(points.Len()))
+	origin.Div(float64(len(points)))
 	dPointList.Origin = origin
 
 	//for i,p := range *points {
@@ -336,7 +329,7 @@ func preparePointList(points *PointList, threadCount int) DelaunayPointList {
 		go func(tMin, tMax int) {
 			defer wg.Done()
 			for i := tMin; i < tMax; i++ {
-				p := (*points)[i]
+				p := points[i]
 				dPointList.Points[i] = DelaunayPoint{
 					Point:      p,
 					Distance:   LengthSquared(Sub(p, dPointList.Origin)),
@@ -943,7 +936,7 @@ func (d *Delaunay) triangulatePoints(pl *DelaunayPointList) {
 
 }
 
-func TriangulateMultithreaded(pointList PointList, threadCount int) Delaunay {
+func TriangulateMultithreaded(pointList []Vector, threadCount int) Delaunay {
 
 	if len(pointList) < 3 {
 		s := NewArrayMap(0)
@@ -958,7 +951,7 @@ func TriangulateMultithreaded(pointList PointList, threadCount int) Delaunay {
 		}
 	}
 
-	dPointList := preparePointList(&pointList, threadCount)
+	dPointList := preparePointList(pointList, threadCount)
 	//defer fmt.Printf("point to be inserted last: %v\n", dPointList.Points[52])
 	//dPointList.Points = dPointList.Points[:7]
 
@@ -976,7 +969,7 @@ func TriangulateMultithreaded(pointList PointList, threadCount int) Delaunay {
 		firstFreeVertexPos: 0,
 		Edges:              make([]HEEdge, edgeCount),
 		firstFreeEdgePos:   0,
-		Faces:              make([]HEFace, edgeCount/3),
+		Faces:              make([]HEFace, edgeCount/3, edgeCount/3),
 		firstFreeFacePos:   0,
 	}
 	delaunay.frontier = delaunay.initializeTriangulation(&dPointList)
@@ -1004,7 +997,7 @@ func TriangulateMultithreaded(pointList PointList, threadCount int) Delaunay {
 
 }
 
-func Triangulate(pointList PointList) Delaunay {
+func Triangulate(pointList []Vector) Delaunay {
 	return TriangulateMultithreaded(pointList, 4)
 }
 

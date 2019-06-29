@@ -28,58 +28,10 @@ type Edge struct {
 }
 
 // Implement the sort.Interface, so it can be sorted by the standard algorithm of Go.
-type PointList []Vector
+//type PointList []Vector
 
 func (v Vector) String() string {
 	return fmt.Sprintf("{x: %.1f, y: %.1f}", v.X, v.Y)
-}
-
-/*
-// By is the type of a "less" function that defines the ordering of its Planet arguments.
-type By func(i, j *Vector) bool
-
-// planetSorter joins a By function and a slice of Planets to be sorted.
-type pointSorter struct {
-	points PointList
-	by     func(i, j *Vector) bool // Closure used in the Less method.
-}
-
-// Sort is a method on the function type, By, that sorts the argument slice according to the function.
-func (by By) Sort(points PointList) {
-	ps := &pointSorter{
-		points: points,
-		by:     by, // The Sort method's receiver is the function (closure) that defines the sort order.
-	}
-	sort.Sort(ps)
-}
-
-// Len is part of sort.Interface.
-func (s *pointSorter) Len() int {
-	return len(s.points)
-}
-
-// Swap is part of sort.Interface.
-func (s *pointSorter) Swap(i, j int) {
-	s.points[i], s.points[j] = s.points[j], s.points[i]
-}
-
-// Less is part of sort.Interface. It is implemented by calling the "by" closure in the sorter.
-func (s *pointSorter) Less(i, j int) bool {
-	return s.by(&s.points[i], &s.points[j])
-}
-
-func (slice PointList) Len() int {
-	return len(slice)
-}
-func (slice PointList) Less(i, j int) bool {
-	return slice[i].X < slice[j].X
-}
-func (slice PointList) Swap(i, j int) {
-	slice[i], slice[j] = slice[j], slice[i]
-}
-*/
-func (slice PointList) Len() int {
-	return len(slice)
 }
 
 // Just makes the edge a lot bigger according to s.
