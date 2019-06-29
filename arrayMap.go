@@ -35,9 +35,9 @@ func NewArrayMap(size int) *ArrayMap {
 		lookup: make([]*List, size, size),
 		list:   nil,
 
-		memPool:                 make([]List, size, size),
+		memPool:                 make([]List, size),
 		initialPoolIndex:        0,
-		memPoolFreeIndices:      make([]int, size, size),
+		memPoolFreeIndices:      make([]int, size),
 		memPoolFreeIndicesIndex: 0,
 	}
 }
@@ -56,8 +56,9 @@ func (t *ArrayMap) newListElement() int {
 		} else {
 			// We have to resize the buffer because all items from the memory pool seem to be used and not getting recycled fast enough...
 			// Lets just add 100 new items for now.
-			t.memPool = append(t.memPool, make([]List, 5, 5)...)
-			t.memPoolFreeIndices = append(t.memPoolFreeIndices, make([]int, 5, 5)...)
+			newItems := 10
+			t.memPool = append(t.memPool, make([]List, newItems)...)
+			t.memPoolFreeIndices = append(t.memPoolFreeIndices, make([]int, newItems)...)
 			t.initialPoolIndex++
 			return t.initialPoolIndex - 1
 		}
