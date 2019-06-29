@@ -13,6 +13,7 @@ import (
 	//s "github.com/MauriceGit/skiplist"
 
 	//"time"
+	"math/rand"
 	"sync"
 )
 
@@ -131,6 +132,47 @@ func (s *pointSorter) Swap(i, j int) {
 // Less is part of sort.Interface. It is implemented by calling the "by" closure in the sorter.
 func (s *pointSorter) Less(i, j int) bool {
 	return s.by(&s.points[i], &s.points[j])
+}
+
+func smaller(v1, v2 *DelaunayPoint) bool {
+	// sort by radius
+	if math.Abs(v1.Distance-v2.Distance) >= EPS {
+		return v1.Distance < v2.Distance
+	}
+	// if radius is equal, sort by polar angle
+	return v1.PolarAngle < v2.PolarAngle
+}
+
+// Custom  and short quicksort from Stackoverflow... https://stackoverflow.com/questions/23276417/golang-custom-sort-is-faster-than-native-sort
+func qsort(a []DelaunayPoint) []DelaunayPoint {
+	if len(a) < 2 {
+		return a
+	}
+
+	left, right := 0, len(a)-1
+
+	// Pick a pivot
+	pivotIndex := rand.Int() % len(a)
+
+	// Move the pivot to the right
+	a[pivotIndex], a[right] = a[right], a[pivotIndex]
+
+	// Pile elements smaller than the pivot on the left
+	for i := range a {
+		if smaller(&a[i], &a[right]) {
+			a[i], a[left] = a[left], a[i]
+			left++
+		}
+	}
+
+	// Place the pivot after the last smaller element
+	a[left], a[right] = a[right], a[left]
+
+	// Go down the rabbit hole
+	qsort(a[:left])
+	qsort(a[left+1:])
+
+	return a
 }
 
 ////////////////////////////////////////////////////////////////////////
@@ -341,16 +383,20 @@ func preparePointList(points []Vector, threadCount int) DelaunayPointList {
 
 	wg.Wait()
 
-	distance := func(v1, v2 *DelaunayPoint) bool {
-		// sort by radius
-		if math.Abs(v1.Distance-v2.Distance) >= EPS {
-			return v1.Distance < v2.Distance
+	/*
+		distance := func(v1, v2 *DelaunayPoint) bool {
+			// sort by radius
+			if math.Abs(v1.Distance-v2.Distance) >= EPS {
+				return v1.Distance < v2.Distance
+			}
+			// if radius is equal, sort by polar angle
+			return v1.PolarAngle < v2.PolarAngle
 		}
-		// if radius is equal, sort by polar angle
-		return v1.PolarAngle < v2.PolarAngle
-	}
+	*/
 
-	By(distance).Sort(dPointList.Points)
+	//By(distance).Sort(dPointList.Points)
+
+	dPointList.Points = qsort(dPointList.Points)
 
 	// ToDo:
 	// This is very hacky and should be improved first thing, when the algorithms works...
