@@ -392,9 +392,8 @@ func preparePointList(points []Vector, threadCount int) DelaunayPointList {
 			// if radius is equal, sort by polar angle
 			return v1.PolarAngle < v2.PolarAngle
 		}
+		By(distance).Sort(dPointList.Points)
 	*/
-
-	//By(distance).Sort(dPointList.Points)
 
 	dPointList.Points = qsort(dPointList.Points)
 
