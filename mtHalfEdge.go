@@ -2,7 +2,6 @@ package mtSweepCircle
 
 import (
 	"fmt"
-	//v "mtVector"
 )
 
 // Just to make the code more readable.
