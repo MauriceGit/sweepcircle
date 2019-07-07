@@ -483,7 +483,7 @@ func triangleIsValid_mine(a, b, c, d Vector) bool {
 	g_matrixElements[2][3] = d.X*d.X + d.Y*d.Y
 
 	// Making the eps smaller does not seem to create problems.
-	return Fast4x4Determinant(&g_matrixElements) <= 0.001
+	return Fast4x4Determinant(&g_matrixElements) <= EPS
 }
 
 // Function from Delaunay implementation of Fogleman. TODO: Check licence
@@ -499,7 +499,7 @@ func triangleIsValid(a, b, c, p Vector) bool {
 	bp := ex*ex + ey*ey
 	cp := fx*fx + fy*fy
 
-	return dx*(ey*cp-bp*fy)-dy*(ex*cp-bp*fx)+ap*(ex*fy-ey*fx) < 0.001
+	return dx*(ey*cp-bp*fy)-dy*(ex*cp-bp*fx)+ap*(ex*fy-ey*fx) < EPS
 }
 
 func (d *Delaunay) flipEdge(e EdgeIndex) {

@@ -91,7 +91,7 @@ func (v *Vector) Mult(s float64) {
 }
 
 func (v *Vector) Div(s float64) {
-	if math.Abs(s) <= 0.000001 {
+	if math.Abs(s) <= EPS {
 		fmt.Println("Zero division detected!!!")
 		return
 	}
