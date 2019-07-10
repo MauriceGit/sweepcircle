@@ -139,11 +139,11 @@ func (d *Delaunay) Verify() error {
 			// Every valid edge MUST have a valid Twin edge!
 			if e.ETwin == EmptyEdge || d.Edges[e.ETwin] == EmptyE {
 				return errors.New(fmt.Sprintf("Edge %v: %v has an invalid twin edge", i, e))
-			}
-
-			// Twins must refer to each other!
-			if i != int(d.Edges[e.ETwin].ETwin) {
-				return errors.New(fmt.Sprintf("Edge %v and his Twin %v don't refer to each other", i, e.ETwin))
+			} else {
+				// Twins must refer to each other!
+				if i != int(d.Edges[e.ETwin].ETwin) {
+					return errors.New(fmt.Sprintf("Edge %v and his Twin %v don't refer to each other", i, e.ETwin))
+				}
 			}
 
 			// Check if the origin vertex is valid (if there is one)
@@ -1017,7 +1017,7 @@ func calculateVertexPosition(e1, e2 Edge) Vector {
 
 	div := det2D(xdiff, ydiff)
 	if math.Abs(div) <= EPS {
-		fmt.Printf("Lines do not intersect!\n")
+		//fmt.Printf("Lines do not intersect!\n")
 		return Vector{}
 	}
 
@@ -1093,7 +1093,7 @@ func (v *Voronoi) Verify() error {
 			for e != EmptyEdge && e != startEdge {
 
 				if v.Edges[e].FFace != FaceIndex(i) {
-					return errors.New(fmt.Sprintf("Edge %v of the face %v: %v does not point to the right face!", e, i, f))
+					return errors.New(fmt.Sprintf("Edge %v should point to face : %v  but points to: %v)", e, f, v.Edges[e].FFace))
 				}
 
 				e = v.Edges[e].ENext
@@ -1209,6 +1209,18 @@ func (d *Delaunay) CreateVoronoi() Voronoi {
 		e2 := v.createEdge(newVertex, EmptyEdge, EmptyEdge, EmptyEdge, FaceIndex(d.Edges[de3].VOrigin), b2)
 		e3 := v.createEdge(newVertex, EmptyEdge, EmptyEdge, EmptyEdge, FaceIndex(d.Edges[de1].VOrigin), b3)
 
+		if FaceIndex(d.Edges[de2].VOrigin) == 563313 && e1 == 3377004 {
+			fmt.Printf("error1: %v\n", v.Edges[e1])
+		}
+
+		if FaceIndex(d.Edges[de3].VOrigin) == 563313 && e2 == 3377004 {
+			fmt.Printf("error2.\n")
+		}
+
+		if FaceIndex(d.Edges[de1].VOrigin) == 563313 && e3 == 3377004 {
+			fmt.Printf("error3.\n")
+		}
+
 		// Assign the edge reference for a face (if not already done!)
 		if v.Faces[d.Edges[de1].VOrigin].EEdge == EmptyEdge {
 			v.Faces[d.Edges[de1].VOrigin].EEdge = e3
@@ -1223,6 +1235,10 @@ func (d *Delaunay) CreateVoronoi() Voronoi {
 		v.connectToExistingVoronoi(d, outgoingEdges, de1, e1, e2, e3, b1, FaceIndex(i))
 		v.connectToExistingVoronoi(d, outgoingEdges, de2, e2, e3, e1, b2, FaceIndex(i))
 		v.connectToExistingVoronoi(d, outgoingEdges, de3, e3, e1, e2, b3, FaceIndex(i))
+
+		if FaceIndex(d.Edges[de2].VOrigin) == 563313 && e1 == 3377004 {
+			fmt.Printf("error1: %v\n", v.Edges[e1])
+		}
 
 		// For fast lookup later
 		outgoingEdges[i][0] = e1

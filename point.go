@@ -57,8 +57,8 @@ func (e Edge) Copy() Edge {
 }
 
 func Equal(v1, v2 Vector) bool {
-	return math.Abs(v1.X-v2.X) <= EPS &&
-		math.Abs(v1.Y-v2.Y) <= EPS
+	return math.Abs(v1.X-v2.X) < EPS &&
+		math.Abs(v1.Y-v2.Y) < EPS
 }
 
 func Add(v1, v2 Vector) Vector {
