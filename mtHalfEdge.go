@@ -5,14 +5,14 @@ import (
 )
 
 // Just to make the code more readable.
-type EdgeIndex int
-type FaceIndex int
-type VertexIndex int
+//type *HEEdge int
+//type *HEFace int
+//type *HEVertex int
 
-var EmptyFace = FaceIndex(-1)
-var EmptyEdge = EdgeIndex(-1)
-var EmptyVertex = VertexIndex(-1)
-var InfiniteVertex = VertexIndex(-2)
+var EmptyFace *HEFace = nil
+var EmptyEdge *HEEdge = nil
+var EmptyVertex *HEVertex = nil
+var InfiniteVertex *HEVertex = nil
 
 /**
  * All edges, vertices and faces are kept in static, not-resizable slices
@@ -28,7 +28,7 @@ type HEVertex struct {
 	Pos Vector
 }
 
-func (v VertexIndex) Valid() bool {
+func (v *HEVertex) Valid() bool {
 	return v != EmptyVertex && v != InfiniteVertex
 }
 
@@ -39,18 +39,18 @@ type HEFace struct {
 	// Points to an arbitrary edge of its polygon
 	// Only arbitrary for closed faces!!!!
 	// Otherwise it HAS to point to the FIRST edge (counter clockwise)!!!
-	EEdge         EdgeIndex
-	EEdgeParallel EdgeIndex
+	EEdge         *HEEdge
+	EEdgeParallel *HEEdge
 }
 
 type HEEdge struct {
-	VOrigin VertexIndex
-	ETwin   EdgeIndex
+	VOrigin *HEVertex
+	ETwin   *HEEdge
 	// Starts from: this->ETwin->VOrigin. With this->FFace == this->ENext->FFace
 	// Following ENext will traverse the polygon around FFace!
-	ENext EdgeIndex
-	EPrev EdgeIndex
-	FFace FaceIndex
+	ENext *HEEdge
+	EPrev *HEEdge
+	FFace *HEFace
 
 	// Iff VOrigin is NOT defined, an edge representation is required
 	// (general direction + some kind of starting point that is NOT an official HEVertex!)

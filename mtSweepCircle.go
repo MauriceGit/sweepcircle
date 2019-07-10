@@ -18,11 +18,11 @@ const (
 
 type Delaunay struct {
 	Vertices           []HEVertex
-	firstFreeVertexPos VertexIndex
+	firstFreeVertexPos int
 	Edges              []HEEdge
-	firstFreeEdgePos   EdgeIndex
+	firstFreeEdgePos   int
 	Faces              []HEFace
-	firstFreeFacePos   FaceIndex
+	firstFreeFacePos   int
 	frontier           *ArrayMap
 
 	edgeMemPool []HEEdge
@@ -43,9 +43,9 @@ type DelaunayPointList struct {
 
 type FrontElement struct {
 	//// Index into Delaunay.vertices data structure!
-	//Index       VertexIndex
+	//Index       *HEVertex
 	// Index into Delaunay.edges data structure!
-	EdgeIndex EdgeIndex
+	Edge *HEEdge
 	// Polar angle of the vertex of EdgeI
 	PolarAngle float64
 	Radius     float64
@@ -137,43 +137,43 @@ func (d *Delaunay) Verify() error {
 		if e != EmptyE {
 
 			// Every valid edge MUST have a valid Twin edge!
-			if e.ETwin == EmptyEdge || d.Edges[e.ETwin] == EmptyE {
+			if e.ETwin == EmptyEdge || *e.ETwin == EmptyE {
 				return errors.New(fmt.Sprintf("Edge %v: %v has an invalid twin edge", i, e))
 			} else {
 				// Twins must refer to each other!
-				if i != int(d.Edges[e.ETwin].ETwin) {
+				if *e.ETwin.ETwin != e {
 					return errors.New(fmt.Sprintf("Edge %v and his Twin %v don't refer to each other", i, e.ETwin))
 				}
 			}
 
 			// Check if the origin vertex is valid (if there is one)
-			if e.VOrigin == EmptyVertex || d.Vertices[e.VOrigin] == EmptyV {
+			if e.VOrigin == EmptyVertex || *e.VOrigin == EmptyV {
 				return errors.New(fmt.Sprintf("Origin vertex of edge %v: %v is invalid", i, e))
 			}
 
 			// Check, if the face is valid (if defined)
-			if e.FFace != EmptyFace && d.Faces[e.FFace] == EmptyF {
+			if e.FFace != EmptyFace && *e.FFace == EmptyF {
 				return errors.New(fmt.Sprintf("Face of edge %v: %v is invalid", i, e.FFace))
 			}
 
 			// Check, if the next edge is valid
-			if e.ENext != EmptyEdge && d.Edges[e.ENext] == EmptyE {
+			if e.ENext != EmptyEdge && *e.ENext == EmptyE {
 				return errors.New(fmt.Sprintf("Next edge for edge %v: %v is invalid", i, e))
 			}
 
 			// Check, if the prev edge is valid
-			if e.EPrev != EmptyEdge && d.Edges[e.EPrev] == EmptyE {
+			if e.EPrev != EmptyEdge && *e.EPrev == EmptyE {
 				return errors.New(fmt.Sprintf("Prev edge for edge %v: %v is invalid", i, e))
 			}
 
 			// If this->next is not empty, the next one must have a previous edge.
-			if e.ENext != EmptyEdge && d.Edges[e.ENext].EPrev == EmptyEdge {
+			if e.ENext != EmptyEdge && e.ENext.EPrev == EmptyEdge {
 				return errors.New(fmt.Sprintf("Next edge for edge %v must have a non-empty prev", i))
 			}
 
 			// The this edge must correspond to the next->prev edge
-			if e.ENext != EmptyEdge && d.Edges[e.ENext].EPrev != EmptyEdge && d.Edges[e.ENext].EPrev != EdgeIndex(i) {
-				return errors.New(fmt.Sprintf("The edge %v has %v as next edge, which has %v as his previous. They must reference each other!", i, e.ENext, d.Edges[e.ENext].EPrev))
+			if e.ENext != EmptyEdge && e.ENext.EPrev != EmptyEdge && *e.ENext.EPrev != e {
+				return errors.New(fmt.Sprintf("The edge %v has %v as next edge, which has %v as his previous. They must reference each other!", i, e.ENext, *e.ENext.EPrev))
 			}
 		}
 	}
@@ -182,7 +182,7 @@ func (d *Delaunay) Verify() error {
 		if f != EmptyF {
 
 			// Check for valid EEdge
-			if f.EEdge == EmptyEdge || d.Edges[f.EEdge] == EmptyE {
+			if f.EEdge == EmptyEdge || *f.EEdge == EmptyE {
 				return errors.New(fmt.Sprintf("Face %v: %v points to invalid edge", i, f))
 			}
 
@@ -190,15 +190,15 @@ func (d *Delaunay) Verify() error {
 			// Otherwise check, that the edges actually go all the way around the face!
 			startEdge := f.EEdge
 			edgeCount := 0
-			e := d.Edges[startEdge].ENext
+			e := startEdge.ENext
 
 			for e != EmptyEdge && e != startEdge {
 
-				if int(d.Edges[e].FFace) != i {
+				if *e.FFace != f {
 					return errors.New(fmt.Sprintf("Edge %v of the face %v: %v does not point to the right face!", e, i, f))
 				}
 
-				e = d.Edges[e].ENext
+				e = e.ENext
 				edgeCount += 1
 
 				if edgeCount > 3 {
@@ -212,16 +212,16 @@ func (d *Delaunay) Verify() error {
 	return nil
 }
 
-func (d *Delaunay) createFace(refPoint Vector, eEdge EdgeIndex) FaceIndex {
+func (d *Delaunay) createFace(refPoint Vector, eEdge *HEEdge) *HEFace {
 
 	d.Faces[d.firstFreeFacePos].ReferencePoint = refPoint
 	d.Faces[d.firstFreeFacePos].EEdge = eEdge
 
 	d.firstFreeFacePos += 1
-	return d.firstFreeFacePos - 1
+	return &d.Faces[d.firstFreeFacePos-1]
 }
 
-func (d *Delaunay) createEdge(vOrigin VertexIndex, eTwin, ePrev, eNext EdgeIndex, fFace FaceIndex, tmpEdge Edge) EdgeIndex {
+func (d *Delaunay) createEdge(vOrigin *HEVertex, eTwin, ePrev, eNext *HEEdge, fFace *HEFace, tmpEdge Edge) *HEEdge {
 
 	d.Edges[d.firstFreeEdgePos].VOrigin = vOrigin
 	d.Edges[d.firstFreeEdgePos].ETwin = eTwin
@@ -231,15 +231,15 @@ func (d *Delaunay) createEdge(vOrigin VertexIndex, eTwin, ePrev, eNext EdgeIndex
 	d.Edges[d.firstFreeEdgePos].TmpEdge = tmpEdge
 
 	d.firstFreeEdgePos += 1
-	return d.firstFreeEdgePos - 1
+	return &d.Edges[d.firstFreeEdgePos-1]
 }
 
-func (d *Delaunay) createVertex(pos Vector) VertexIndex {
+func (d *Delaunay) createVertex(pos Vector) *HEVertex {
 
 	d.Vertices[d.firstFreeVertexPos].Pos = pos
 
 	d.firstFreeVertexPos += 1
-	return d.firstFreeVertexPos - 1
+	return &d.Vertices[d.firstFreeVertexPos-1]
 }
 
 func smaller(v1, v2 *DelaunayPoint) bool {
@@ -417,36 +417,37 @@ func (d *Delaunay) initializeTriangulation(pl *DelaunayPointList) *ArrayMap {
 
 	// We can write edge == 0 because e will be the very first edge that will always be at index 0.
 	// We write a -1 vector so it is different to Vector{}.
-	f := d.createFace(Vector{-1, -1}, 0)
+	f := d.createFace(Vector{-1, -1}, nil)
 
 	// Edge 0-->1
-	e := d.createEdge(0, EmptyEdge, EmptyEdge, EmptyEdge, f, Edge{})
+	e := d.createEdge(&d.Vertices[0], EmptyEdge, EmptyEdge, EmptyEdge, f, Edge{})
+	f.EEdge = e
 	// Edge 1-->0
-	eT := d.createEdge(1, e, EmptyEdge, EmptyEdge, EmptyFace, Edge{})
-	d.Edges[e].ETwin = eT
-	d.Faces[f].EEdge = e
+	eT := d.createEdge(&d.Vertices[1], e, EmptyEdge, EmptyEdge, EmptyFace, Edge{})
+	e.ETwin = eT
+	f.EEdge = e
 
 	// Edge 1-->2
-	e2 := d.createEdge(1, EmptyEdge, e, EmptyEdge, f, Edge{})
+	e2 := d.createEdge(&d.Vertices[1], EmptyEdge, e, EmptyEdge, f, Edge{})
 	// Edge 2-->1
-	e2T := d.createEdge(2, e2, EmptyEdge, EmptyEdge, EmptyFace, Edge{})
-	d.Edges[e2].ETwin = e2T
+	e2T := d.createEdge(&d.Vertices[2], e2, EmptyEdge, EmptyEdge, EmptyFace, Edge{})
+	e2.ETwin = e2T
 
 	// Edge 2-->0
-	e3 := d.createEdge(2, EmptyEdge, e2, e, f, Edge{})
+	e3 := d.createEdge(&d.Vertices[2], EmptyEdge, e2, e, f, Edge{})
 	// Edge 0-->2
-	e3T := d.createEdge(0, e3, EmptyEdge, EmptyEdge, EmptyFace, Edge{})
-	d.Edges[e3].ETwin = e3T
+	e3T := d.createEdge(&d.Vertices[0], e3, EmptyEdge, EmptyEdge, EmptyFace, Edge{})
+	e3.ETwin = e3T
 
-	d.Edges[e].EPrev = e3
-	d.Edges[e].ENext = e2
-	d.Edges[e2].ENext = e3
+	e.EPrev = e3
+	e.ENext = e2
+	e2.ENext = e3
 
-	f0.EdgeIndex = eT
+	f0.Edge = eT
 	f0.PolarAngle = calcPolarAngle(d.Vertices[1].Pos, (*pl).Origin)
-	f1.EdgeIndex = e2T
+	f1.Edge = e2T
 	f1.PolarAngle = calcPolarAngle(d.Vertices[2].Pos, (*pl).Origin)
-	f2.EdgeIndex = e3T
+	f2.Edge = e3T
 	f2.PolarAngle = calcPolarAngle(d.Vertices[0].Pos, (*pl).Origin)
 
 	// Pop first three points, because they are already triangulated by default
@@ -502,50 +503,50 @@ func triangleIsValid(a, b, c, p Vector) bool {
 	return dx*(ey*cp-bp*fy)-dy*(ex*cp-bp*fx)+ap*(ex*fy-ey*fx) < EPS
 }
 
-func (d *Delaunay) flipEdge(e EdgeIndex) {
+func (d *Delaunay) flipEdge(e *HEEdge) {
 
-	e1 := d.Edges[e].ENext
-	e2 := d.Edges[e1].ENext
-	eT := d.Edges[e].ETwin
-	eT1 := d.Edges[eT].ENext
-	eT2 := d.Edges[eT1].ENext
+	e1 := e.ENext
+	e2 := e1.ENext
+	eT := e.ETwin
+	eT1 := eT.ENext
+	eT2 := eT1.ENext
 
 	// Let's make sure that the face references are not affected by flipping the middle edge
 	// by just assigning them to an edge that will stay with the same face reference anyway!
 	// There could be an extra check for this but this should be not really slower and is correct every time.
-	d.Faces[d.Edges[e].FFace].EEdge = e2
-	d.Faces[d.Edges[eT].FFace].EEdge = eT2
+	e.FFace.EEdge = e2
+	eT.FFace.EEdge = eT2
 
-	d.Edges[e2].ENext = eT1
-	d.Edges[eT1].EPrev = e2
+	e2.ENext = eT1
+	eT1.EPrev = e2
 
-	d.Edges[eT2].ENext = e1
-	d.Edges[e1].EPrev = eT2
+	eT2.ENext = e1
+	e1.EPrev = eT2
 
 	// Instead of creating new edges, we can just substitute the to-be-deleted edges
-	d.Edges[e].VOrigin = d.Edges[eT2].VOrigin
-	d.Edges[e].ENext = e2
-	d.Edges[e].EPrev = eT1
+	e.VOrigin = eT2.VOrigin
+	e.ENext = e2
+	e.EPrev = eT1
 
-	d.Edges[eT].VOrigin = d.Edges[e2].VOrigin
-	d.Edges[eT].ENext = eT2
-	d.Edges[eT].EPrev = e1
+	eT.VOrigin = e2.VOrigin
+	eT.ENext = eT2
+	eT.EPrev = e1
 
 	// Reconnect other edges correctly
-	d.Edges[e1].ENext = eT
-	d.Edges[eT2].EPrev = eT
-	d.Edges[eT1].ENext = e
-	d.Edges[e2].EPrev = e
+	e1.ENext = eT
+	eT2.EPrev = eT
+	eT1.ENext = e
+	e2.EPrev = e
 
 	// Faces rotate 90° counter clockwise. So have to be redefined for some edges.
-	d.Edges[e1].FFace = d.Edges[eT].FFace
-	d.Edges[eT1].FFace = d.Edges[e].FFace
+	e1.FFace = eT.FFace
+	eT1.FFace = e.FFace
 
 }
 
 // Recursively flips edges until all triangles are correct delaunay triangles.
 // This should never affect the frontier, as only internal edges can be flipped.
-func (d *Delaunay) legalizeTriangle(e EdgeIndex, v Vector, firstE EdgeIndex, firstTime bool) {
+func (d *Delaunay) legalizeTriangle(e *HEEdge, v Vector, firstE *HEEdge, firstTime bool) {
 
 	// We might recursively itereate the same triangles. So if we arive at the very first triangle again,
 	// we exit the recursion! Things are fine.
@@ -554,18 +555,18 @@ func (d *Delaunay) legalizeTriangle(e EdgeIndex, v Vector, firstE EdgeIndex, fir
 	}
 
 	// recursion ends at outer bounds.
-	e1 := d.Edges[e].ENext
+	e1 := e.ENext
 	if e1 == EmptyEdge {
 		return
 	}
-	e2 := d.Edges[e1].ENext
+	e2 := e1.ENext
 	if e2 == EmptyEdge {
 		return
 	}
 
-	a := d.Vertices[d.Edges[e].VOrigin].Pos
-	b := d.Vertices[d.Edges[e1].VOrigin].Pos
-	c := d.Vertices[d.Edges[e2].VOrigin].Pos
+	a := e.VOrigin.Pos
+	b := e1.VOrigin.Pos
+	c := e2.VOrigin.Pos
 
 	if !triangleIsValid(a, b, c, v) {
 
@@ -575,10 +576,10 @@ func (d *Delaunay) legalizeTriangle(e EdgeIndex, v Vector, firstE EdgeIndex, fir
 		// Recursively check neighboring triangles
 		// Do we _really_ need to check all four directions???
 		// TODO: Try limiting the recursion to fewer directions? Check other Delaunay implementations!!!
-		d.legalizeTriangle(d.Edges[e1].ETwin, v, firstE, false)
-		d.legalizeTriangle(d.Edges[e2].ETwin, v, firstE, false)
-		d.legalizeTriangle(d.Edges[d.Edges[e].EPrev].ETwin, c, firstE, false)
-		d.legalizeTriangle(d.Edges[d.Edges[e1].EPrev].ETwin, c, firstE, false)
+		d.legalizeTriangle(e1.ETwin, v, firstE, false)
+		d.legalizeTriangle(e2.ETwin, v, firstE, false)
+		d.legalizeTriangle(e.EPrev.ETwin, c, firstE, false)
+		d.legalizeTriangle(e1.EPrev.ETwin, c, firstE, false)
 
 	}
 
@@ -587,7 +588,7 @@ func (d *Delaunay) legalizeTriangle(e EdgeIndex, v Vector, firstE EdgeIndex, fir
 // Recursive function that walks right as long as there is a triangle to be created (to fill holes)
 // that match the pi/2 angle criteria.
 // TODO: Pass vector position directly without going through the frontier and delaunay every time.
-func (d *Delaunay) createConsecutiveTrianglesRight(baseVertex VertexIndex, leafNode *List, maxFillAngle float64) {
+func (d *Delaunay) createConsecutiveTrianglesRight(baseVertex *HEVertex, leafNode *List, maxFillAngle float64) {
 
 	//nextFrontier := d.frontier.Next(leafNode)
 	nextFrontier := leafNode.Next
@@ -595,13 +596,13 @@ func (d *Delaunay) createConsecutiveTrianglesRight(baseVertex VertexIndex, leafN
 	leafNodeValue := leafNode.Value
 	nextFrontierValue := nextFrontier.Value
 
-	basePos := d.Vertices[baseVertex].Pos
+	basePos := baseVertex.Pos
 
-	e0 := leafNodeValue.EdgeIndex
-	e1 := nextFrontierValue.EdgeIndex
+	e0 := leafNodeValue.Edge
+	e1 := nextFrontierValue.Edge
 
-	v0 := d.Vertices[d.Edges[e0].VOrigin].Pos
-	v1 := d.Vertices[d.Edges[e1].VOrigin].Pos
+	v0 := e0.VOrigin.Pos
+	v1 := e1.VOrigin.Pos
 
 	isRight := IsRight2D(basePos, v0, v1)
 	angle := AngleRad(Sub(basePos, v0), Sub(v1, v0))
@@ -622,29 +623,29 @@ func (d *Delaunay) createConsecutiveTrianglesRight(baseVertex VertexIndex, leafN
 
 		// Create one new triangle before calling recursively.
 		f := d.createFace(Vector{-1, -1}, e0)
-		d.Edges[e0].FFace = f
-		d.Edges[e1].FFace = f
+		e0.FFace = f
+		e1.FFace = f
 
 		eNew1 := d.createEdge(baseVertex, EmptyEdge, e0, e1, f, Edge{})
-		eNew2 := d.createEdge(d.Edges[e1].VOrigin, eNew1, EmptyEdge, EmptyEdge, EmptyFace, Edge{})
+		eNew2 := d.createEdge(e1.VOrigin, eNew1, EmptyEdge, EmptyEdge, EmptyFace, Edge{})
 
-		d.Edges[eNew1].ETwin = eNew2
+		eNew1.ETwin = eNew2
 
-		d.Edges[e0].ENext = eNew1
-		d.Edges[e1].EPrev = eNew1
+		e0.ENext = eNew1
+		e1.EPrev = eNew1
 
-		d.Edges[e0].EPrev = e1
-		d.Edges[e1].ENext = e0
+		e0.EPrev = e1
+		e1.ENext = e0
 
-		nextFrontier.Value.EdgeIndex = eNew2
+		nextFrontier.Value.Edge = eNew2
 
 		d.frontier.Delete(leafNode)
 
 		// Validate towards the previous triangle created consecutively
-		tp := d.Vertices[d.Edges[d.Edges[d.Edges[e0].ETwin].EPrev].VOrigin].Pos
+		tp := e0.ETwin.EPrev.VOrigin.Pos
 		d.legalizeTriangle(e0, tp, e0, true)
 		// Validate towards inside the triangulation
-		tp = d.Vertices[d.Edges[d.Edges[d.Edges[e1].ETwin].EPrev].VOrigin].Pos
+		tp = e1.ETwin.EPrev.VOrigin.Pos
 		d.legalizeTriangle(e1, tp, e1, true)
 
 		d.createConsecutiveTrianglesRight(baseVertex, nextFrontier, maxFillAngle)
@@ -656,21 +657,21 @@ func (d *Delaunay) createConsecutiveTrianglesRight(baseVertex VertexIndex, leafN
 // Recursive function that walks right as long as there is a triangle to be created (to fill holes)
 // that match the pi/2 angle criteria.
 // TODO: Pass vector position directly without going through the frontier and delaunay every time.
-func (d *Delaunay) createConsecutiveTrianglesLeft(baseVertex VertexIndex, leafNode *List, maxFillAngle float64) {
+func (d *Delaunay) createConsecutiveTrianglesLeft(baseVertex *HEVertex, leafNode *List, maxFillAngle float64) {
 
 	leafNodeValue := leafNode.Value
 
 	prevFrontier := leafNode.Prev
 	prevFrontierValue := prevFrontier.Value
 
-	basePos := d.Vertices[baseVertex].Pos
+	basePos := baseVertex.Pos
 
-	e0 := leafNodeValue.EdgeIndex
-	e1 := prevFrontierValue.EdgeIndex
+	e0 := leafNodeValue.Edge
+	e1 := prevFrontierValue.Edge
 
-	v0 := d.Vertices[d.Edges[e1].VOrigin].Pos
-	v1Vertex := d.Edges[d.Edges[e1].ETwin].VOrigin
-	v1 := d.Vertices[v1Vertex].Pos
+	v0 := e1.VOrigin.Pos
+	v1Vertex := e1.ETwin.VOrigin
+	v1 := v1Vertex.Pos
 
 	isLeft := IsLeft2D(basePos, v0, v1)
 	angle := AngleRad(Sub(basePos, v0), Sub(v1, v0))
@@ -678,29 +679,29 @@ func (d *Delaunay) createConsecutiveTrianglesLeft(baseVertex VertexIndex, leafNo
 	if isLeft && angle <= maxFillAngle {
 
 		f := d.createFace(Vector{-1, -1}, e0)
-		d.Edges[e0].FFace = f
-		d.Edges[e1].FFace = f
+		e0.FFace = f
+		e1.FFace = f
 
 		eNew1 := d.createEdge(v1Vertex, EmptyEdge, e1, e0, f, Edge{})
 		eNew2 := d.createEdge(baseVertex, eNew1, EmptyEdge, EmptyEdge, EmptyFace, Edge{})
 
-		d.Edges[eNew1].ETwin = eNew2
+		eNew1.ETwin = eNew2
 
-		d.Edges[e1].ENext = eNew1
-		d.Edges[e0].EPrev = eNew1
+		e1.ENext = eNew1
+		e0.EPrev = eNew1
 
-		d.Edges[e0].ENext = e1
-		d.Edges[e1].EPrev = e0
+		e0.ENext = e1
+		e1.EPrev = e0
 
-		leafNode.Value.EdgeIndex = eNew2
+		leafNode.Value.Edge = eNew2
 
 		d.frontier.Delete(prevFrontier)
 
 		// Validate towards the previous triangle created consecutively
-		tp := d.Vertices[d.Edges[d.Edges[d.Edges[e0].ETwin].EPrev].VOrigin].Pos
+		tp := e0.ETwin.EPrev.VOrigin.Pos
 		d.legalizeTriangle(e0, tp, e0, true)
 		// Validate towards inside the triangulation
-		tp = d.Vertices[d.Edges[d.Edges[d.Edges[e1].ETwin].EPrev].VOrigin].Pos
+		tp = e1.ETwin.EPrev.VOrigin.Pos
 		d.legalizeTriangle(e1, tp, e1, true)
 
 		d.createConsecutiveTrianglesLeft(baseVertex, leafNode, maxFillAngle)
@@ -715,7 +716,7 @@ func extendByPoint(p DelaunayPoint, d *Delaunay, center Vector) {
 
 	vi := d.createVertex(p.Point)
 
-	existingE := frontierItemValue.EdgeIndex
+	existingE := frontierItemValue.Edge
 
 	nextLeaf := frontierItem.Next
 	nextLeafV := nextLeaf.Value
@@ -723,10 +724,10 @@ func extendByPoint(p DelaunayPoint, d *Delaunay, center Vector) {
 	// If we have all vertices on a line, we don't want to create two triangles to somewhere.
 	// We only create two triangles when the second one is well defined (has some angle)
 	if math.Abs(frontierItemValue.PolarAngle-p.PolarAngle) <= EPS {
-		nextE := nextLeafV.EdgeIndex
+		nextE := nextLeafV.Edge
 
-		p0 := d.Vertices[d.Edges[existingE].VOrigin].Pos
-		p1 := d.Vertices[d.Edges[nextE].VOrigin].Pos
+		p0 := existingE.VOrigin.Pos
+		p1 := nextE.VOrigin.Pos
 
 		v1 := Sub(p0, p.Point)
 		v2 := Sub(p1, p.Point)
@@ -737,61 +738,61 @@ func extendByPoint(p DelaunayPoint, d *Delaunay, center Vector) {
 	}
 
 	fi1 := d.createFace(Vector{-1, -1}, existingE)
-	d.Edges[existingE].FFace = fi1
+	existingE.FFace = fi1
 
-	twinV := d.Edges[d.Edges[existingE].ETwin].VOrigin
+	twinV := existingE.ETwin.VOrigin
 	ei1 := d.createEdge(twinV, EmptyEdge, existingE, EmptyEdge, fi1, Edge{})
 	ei2 := d.createEdge(vi, ei1, EmptyEdge, EmptyEdge, EmptyFace, Edge{})
-	d.Edges[ei1].ETwin = ei2
+	ei1.ETwin = ei2
 
-	d.Edges[existingE].ENext = ei1
+	existingE.ENext = ei1
 
 	ej1 := d.createEdge(vi, EmptyEdge, ei1, existingE, fi1, Edge{})
-	ej2 := d.createEdge(d.Edges[existingE].VOrigin, ej1, EmptyEdge, EmptyEdge, EmptyFace, Edge{})
+	ej2 := d.createEdge(existingE.VOrigin, ej1, EmptyEdge, EmptyEdge, EmptyFace, Edge{})
 
-	d.Edges[ej1].ETwin = ej2
+	ej1.ETwin = ej2
 
-	d.Edges[ei1].ENext = ej1
-	d.Edges[existingE].EPrev = ej1
+	ei1.ENext = ej1
+	existingE.EPrev = ej1
 
 	// If we hit a vertex directly, we have to create a second triangle to the left as well so we don't have duplicate
 	// keys in our d.frontier data structure!
 	if hitVertex {
 
-		prevVertex := d.Edges[nextLeafV.EdgeIndex].VOrigin
+		prevVertex := nextLeafV.Edge.VOrigin
 
 		fj2 := d.createFace(Vector{-1, -1}, ej2)
-		d.Edges[ej2].FFace = fj2
+		ej2.FFace = fj2
 
-		ek1 := d.createEdge(vi, EmptyEdge, ej2, nextLeafV.EdgeIndex, fj2, Edge{})
+		ek1 := d.createEdge(vi, EmptyEdge, ej2, nextLeafV.Edge, fj2, Edge{})
 		ek2 := d.createEdge(prevVertex, ek1, EmptyEdge, EmptyEdge, EmptyFace, Edge{})
 
-		d.Edges[ek1].ETwin = ek2
+		ek1.ETwin = ek2
 
-		d.Edges[ej2].ENext = ek1
-		d.Edges[nextLeafV.EdgeIndex].EPrev = ek1
-		d.Edges[nextLeafV.EdgeIndex].ENext = ej2
-		d.Edges[nextLeafV.EdgeIndex].FFace = fj2
-		d.Edges[ej2].EPrev = nextLeafV.EdgeIndex
+		ej2.ENext = ek1
+		nextLeafV.Edge.EPrev = ek1
+		nextLeafV.Edge.ENext = ej2
+		nextLeafV.Edge.FFace = fj2
+		ej2.EPrev = nextLeafV.Edge
 
-		nextLeaf.Value.EdgeIndex = ek2
+		nextLeaf.Value.Edge = ek2
 
-		frontierItem.Value.EdgeIndex = ei2
+		frontierItem.Value.Edge = ei2
 		frontierItem.Value.Radius = p.Distance
 
 		// There must exist a triangle behind the previous d.frontier edge. So this should be save.
-		d2 := d.Vertices[d.Edges[d.Edges[d.Edges[nextLeafV.EdgeIndex].ETwin].EPrev].VOrigin].Pos
-		d.legalizeTriangle(nextLeafV.EdgeIndex, d2, nextLeafV.EdgeIndex, true)
+		d2 := nextLeafV.Edge.ETwin.EPrev.VOrigin.Pos
+		d.legalizeTriangle(nextLeafV.Edge, d2, nextLeafV.Edge, true)
 
 	} else {
-		frontierItem.Value.EdgeIndex = ej2
+		frontierItem.Value.Edge = ej2
 
 		d.frontier.InsertAfter(FrontElement{ei2, p.PolarAngle, p.Distance}, frontierItem.Prev)
 
 	}
 
 	// There must exist a triangle behind the previous d.frontier edge. So this should be save.
-	tp := d.Vertices[d.Edges[d.Edges[d.Edges[existingE].ETwin].EPrev].VOrigin].Pos
+	tp := existingE.ETwin.EPrev.VOrigin.Pos
 	d.legalizeTriangle(existingE, tp, existingE, true)
 
 	//   x
@@ -849,7 +850,7 @@ func (d *Delaunay) triangulatePoints(pl *DelaunayPointList) {
 	prev := f.Prev
 	prevV := prev.Value
 
-	frontierVertex := d.Edges[prevV.EdgeIndex].VOrigin
+	frontierVertex := prevV.Edge.VOrigin
 	d.createConsecutiveTrianglesRight(frontierVertex, f, DegToRad(180))
 
 	for fV.PolarAngle >= prevV.PolarAngle {
@@ -859,7 +860,7 @@ func (d *Delaunay) triangulatePoints(pl *DelaunayPointList) {
 		prev = f.Prev
 		prevV = prev.Value
 
-		frontierVertex = d.Edges[prevV.EdgeIndex].VOrigin
+		frontierVertex = prevV.Edge.VOrigin
 		d.createConsecutiveTrianglesRight(frontierVertex, f, DegToRad(180))
 	}
 
@@ -870,7 +871,7 @@ func (d *Delaunay) triangulatePoints(pl *DelaunayPointList) {
 	fV = prevV
 	prev = f.Prev
 	prevV = prev.Value
-	frontierVertex = d.Edges[prevV.EdgeIndex].VOrigin
+	frontierVertex = prevV.Edge.VOrigin
 	d.createConsecutiveTrianglesRight(frontierVertex, f, DegToRad(180))
 
 }
@@ -936,23 +937,23 @@ func (d *Delaunay) ExtractEdgeList() []SimpleEdge {
 	edges := []SimpleEdge{}
 
 	for i, e := range d.Edges {
-		// if the index of the twin edge is smaller than i, we already included this edge.
-		if int(e.ETwin) > i {
+		// if the twin edge is the one from the last iteration, we already included the edge.
+		if i == 0 || *e.ETwin != d.Edges[i-1] {
 
 			var p1 Vector
 			var p2 Vector
 			if e.VOrigin != EmptyVertex {
-				p1 = d.Vertices[e.VOrigin].Pos
+				p1 = e.VOrigin.Pos
 			} else {
 				// Only one vertex can ever be missing. Never both.
-				p1 = d.Vertices[d.Edges[e.ETwin].VOrigin].Pos
+				p1 = e.ETwin.VOrigin.Pos
 				p1.Add(Mult(e.TmpEdge.Dir, -10))
 			}
 
-			if d.Edges[e.ETwin].VOrigin != EmptyVertex {
-				p2 = d.Vertices[d.Edges[e.ETwin].VOrigin].Pos
+			if e.ETwin.VOrigin != EmptyVertex {
+				p2 = e.ETwin.VOrigin.Pos
 			} else {
-				p2 = d.Vertices[e.VOrigin].Pos
+				p2 = e.VOrigin.Pos
 				p2.Add(Mult(e.TmpEdge.Dir, -10))
 			}
 
@@ -972,23 +973,23 @@ func (d *Delaunay) ExtractConvexHull() ConvexHull {
 
 	node := d.frontier.GetSmallestNode()
 	for node != largest {
-		e := node.Value.EdgeIndex
-		ch = append(ch, d.Vertices[d.Edges[e].VOrigin].Pos)
+		e := node.Value.Edge
+		ch = append(ch, e.VOrigin.Pos)
 
 		node = node.Next
 	}
 
-	e := largest.Value.EdgeIndex
-	ch = append(ch, d.Vertices[d.Edges[e].VOrigin].Pos)
+	e := largest.Value.Edge
+	ch = append(ch, e.VOrigin.Pos)
 
 	return ch
 
 }
 
 // Expects an Inner edge! Not the outward facing one!
-func calcPerpendicularBisector(d *Delaunay, e EdgeIndex) Edge {
-	p1 := d.Vertices[d.Edges[e].VOrigin].Pos
-	p2 := d.Vertices[d.Edges[d.Edges[e].ETwin].VOrigin].Pos
+func calcPerpendicularBisector(d *Delaunay, e *HEEdge) Edge {
+	p1 := e.VOrigin.Pos
+	p2 := e.ETwin.VOrigin.Pos
 
 	diff := Sub(p2, p1)
 	cross := Perpendicular(diff)
@@ -1036,43 +1037,43 @@ func (v *Voronoi) Verify() error {
 		if e != EmptyE {
 
 			// Every valid edge MUST have a valid Twin edge!
-			if e.ETwin == EmptyEdge || v.Edges[e.ETwin] == EmptyE {
+			if e.ETwin == EmptyEdge || *e.ETwin == EmptyE {
 				return errors.New(fmt.Sprintf("Edge %v: %v has an invalid twin edge", i, e))
 			}
 
 			// Twins must refer to each other!
-			if i != int(v.Edges[e.ETwin].ETwin) {
+			if *e.ETwin.ETwin != e {
 				return errors.New(fmt.Sprintf("Edge %v and his Twin %v don't refer to each other", i, e.ETwin))
 			}
 
 			// Check if the origin vertex is valid (if there is one)
-			if e.VOrigin != EmptyVertex && v.Vertices[e.VOrigin] == EmptyV {
+			if e.VOrigin != EmptyVertex && *e.VOrigin == EmptyV {
 				return errors.New(fmt.Sprintf("Origin vertex of edge %v: %v is invalid", i, e))
 			}
 
 			// Check, if the face is valid (if defined)
-			if e.FFace == EmptyFace || v.Faces[e.FFace] == EmptyF {
+			if e.FFace == EmptyFace || *e.FFace == EmptyF {
 				return errors.New(fmt.Sprintf("Face of edge %v: %v is invalid", i, e.FFace))
 			}
 
 			// Check, if the next edge is valid
-			if e.ENext != EmptyEdge && v.Edges[e.ENext] == EmptyE {
+			if e.ENext != EmptyEdge && *e.ENext == EmptyE {
 				return errors.New(fmt.Sprintf("Next edge for edge %v: %v is invalid", i, e))
 			}
 
 			// Check, if the prev edge is valid
-			if e.EPrev != EmptyEdge && v.Edges[e.EPrev] == EmptyE {
+			if e.EPrev != EmptyEdge && *e.EPrev == EmptyE {
 				return errors.New(fmt.Sprintf("Prev edge for edge %v: %v is invalid", i, e))
 			}
 
 			// If this->next is not empty, the next one must have a previous edge.
-			if e.ENext != EmptyEdge && v.Edges[e.ENext].EPrev == EmptyEdge {
+			if e.ENext != EmptyEdge && e.ENext.EPrev == EmptyEdge {
 				return errors.New(fmt.Sprintf("Next edge for edge %v must have a non-empty prev", i))
 			}
 
 			// The this edge must correspond to the next->prev edge
-			if e.ENext != EmptyEdge && v.Edges[e.ENext].EPrev != EmptyEdge && v.Edges[e.ENext].EPrev != EdgeIndex(i) {
-				return errors.New(fmt.Sprintf("The edge %v has %v as next edge, which has %v as his previous. They must reference each other!", i, e.ENext, v.Edges[e.ENext].EPrev))
+			if e.ENext != EmptyEdge && e.ENext.EPrev != EmptyEdge && *e.ENext.EPrev != e {
+				return errors.New(fmt.Sprintf("The edge %v has %v as next edge, which has %v as his previous. They must reference each other!", i, e.ENext, *e.ENext.EPrev))
 			}
 		}
 	}
@@ -1081,25 +1082,25 @@ func (v *Voronoi) Verify() error {
 		if f != EmptyF {
 
 			// Check for valid EEdge
-			if f.EEdge == EmptyEdge || v.Edges[f.EEdge] == EmptyE {
+			if f.EEdge == EmptyEdge || *f.EEdge == EmptyE {
 				return errors.New(fmt.Sprintf("Face %v: %v points to invalid edge", i, f))
 			}
 
 			// If the edge is the first one (no/infinite start-vertex), it's all good.
 			// Otherwise check, that the edges actually go all the way around the face!
 			startEdge := f.EEdge
-			e := v.Edges[startEdge].ENext
+			e := startEdge.ENext
 
 			for e != EmptyEdge && e != startEdge {
 
-				if v.Edges[e].FFace != FaceIndex(i) {
-					return errors.New(fmt.Sprintf("Edge %v should point to face : %v  but points to: %v)", e, f, v.Edges[e].FFace))
+				if e.FFace != &f {
+					return errors.New(fmt.Sprintf("Edge %v should point to face : %v  but points to: %v)", e, f, *e.FFace))
 				}
 
-				e = v.Edges[e].ENext
+				e = e.ENext
 			}
 
-			if e != startEdge && v.Edges[startEdge].EPrev != EmptyEdge {
+			if e != startEdge && startEdge.EPrev != EmptyEdge {
 				return errors.New(fmt.Sprintf("Edge %v does not correctly loop around face %v (All around, it should point to edge: %v)", e, f, startEdge))
 			}
 
@@ -1110,32 +1111,34 @@ func (v *Voronoi) Verify() error {
 }
 
 // The v is actually the Voronoi not Delaunay. But before casting.
-func (v *Delaunay) connectToExistingVoronoi(d *Delaunay, outgoingEdges [][]EdgeIndex, de1, e1, e2, e3 EdgeIndex, b1 Edge, df FaceIndex) {
+/*
+func (v *Delaunay) connectToExistingVoronoi(d *Delaunay, outgoingEdges [][]*HEEdge, de1, e1, e2, e3 *HEEdge, b1 Edge, df *HEFace) {
 
 	// If there is no neighboring triangle/face, we are at the outer bounds
-	f1 := d.Edges[d.Edges[de1].ETwin].FFace
+	f1 := de1.ETwin.FFace
 	if f1 == EmptyFace {
 		// Again: Because we create all the Voronoi faces in a loop at the beginning with the Delaunay Vertices as reference (position),
 		// the Delaunay vertex ids correspond to the Voronoi face ids! So we can just use them where we know it fits.
-		e1T := v.createEdge(EmptyVertex, e1, EmptyEdge, e3, FaceIndex(d.Edges[de1].VOrigin), b1)
-		v.Edges[e1].ETwin = e1T
-		v.Edges[e3].EPrev = e1T
+		// shit shit shit.... not working with pointers any more.
+		e1T := v.createEdge(EmptyVertex, e1, EmptyEdge, e3, *HEFace(de1.VOrigin), b1)
+		e1.ETwin = e1T
+		e3.EPrev = e1T
 
 		// The incoming edge (just created) will be the reference for the face per definition (first edge in incomplete polygon!)
-		v.Faces[d.Edges[de1].VOrigin].EEdge = e1T
+		de1.VOrigin.EEdge = e1T
 
 	} else {
 		// If f1 is smaller than the current face we are iterating, we already created all outgoing edges for this triangle. Meaning, we can just connect!
 		if f1 < df {
 
-			var incomingEdge EdgeIndex
-			adjacentEdge := d.Faces[f1].EEdge
+			var incomingEdge *HEEdge
+			adjacentEdge := f1.EEdge
 			var i int
 			for i = 0; i < 3; i++ {
 
 				// Found the adjacent delaunay edge. So we also know, which is the incoming voronoi edge because they are always! created in the same
 				// order, starting with the edge the face points to and going to .next edges.
-				if d.Edges[adjacentEdge].ETwin == de1 {
+				if adjacentEdge.ETwin == de1 {
 					incomingEdge = outgoingEdges[f1][i]
 					break
 				}
@@ -1174,10 +1177,10 @@ func (d *Delaunay) CreateVoronoi() Voronoi {
 	}
 
 	// Temporary slice of the three outgoing edges for each delaunay face for fast voronoi edge lookup
-	outgoingEdges := make([][]EdgeIndex, len(d.Faces))
+	outgoingEdges := make([][]*HEEdge, len(d.Faces))
 
 	for i, _ := range outgoingEdges {
-		outgoingEdges[i] = make([]EdgeIndex, 3, 3)
+		outgoingEdges[i] = make([]*HEEdge, 3, 3)
 	}
 
 	// Create all Voronoi faces beforehand at the position of the Delaunay vertex. The connection to the edges will be added later.
@@ -1205,19 +1208,19 @@ func (d *Delaunay) CreateVoronoi() Voronoi {
 
 		// Create three outgoing voronoi edges perpendicular to the delaunay edges of the triangle
 		// Face: Instead of calculating d1.twin.origin we can just take d2.origin for the same result!
-		e1 := v.createEdge(newVertex, EmptyEdge, EmptyEdge, EmptyEdge, FaceIndex(d.Edges[de2].VOrigin), b1)
-		e2 := v.createEdge(newVertex, EmptyEdge, EmptyEdge, EmptyEdge, FaceIndex(d.Edges[de3].VOrigin), b2)
-		e3 := v.createEdge(newVertex, EmptyEdge, EmptyEdge, EmptyEdge, FaceIndex(d.Edges[de1].VOrigin), b3)
+		e1 := v.createEdge(newVertex, EmptyEdge, EmptyEdge, EmptyEdge, *HEFace(d.Edges[de2].VOrigin), b1)
+		e2 := v.createEdge(newVertex, EmptyEdge, EmptyEdge, EmptyEdge, *HEFace(d.Edges[de3].VOrigin), b2)
+		e3 := v.createEdge(newVertex, EmptyEdge, EmptyEdge, EmptyEdge, *HEFace(d.Edges[de1].VOrigin), b3)
 
-		if FaceIndex(d.Edges[de2].VOrigin) == 563313 && e1 == 3377004 {
+		if *HEFace(d.Edges[de2].VOrigin) == 563313 && e1 == 3377004 {
 			fmt.Printf("error1: %v\n", v.Edges[e1])
 		}
 
-		if FaceIndex(d.Edges[de3].VOrigin) == 563313 && e2 == 3377004 {
+		if *HEFace(d.Edges[de3].VOrigin) == 563313 && e2 == 3377004 {
 			fmt.Printf("error2.\n")
 		}
 
-		if FaceIndex(d.Edges[de1].VOrigin) == 563313 && e3 == 3377004 {
+		if *HEFace(d.Edges[de1].VOrigin) == 563313 && e3 == 3377004 {
 			fmt.Printf("error3.\n")
 		}
 
@@ -1232,11 +1235,11 @@ func (d *Delaunay) CreateVoronoi() Voronoi {
 			v.Faces[d.Edges[de3].VOrigin].EEdge = e2
 		}
 
-		v.connectToExistingVoronoi(d, outgoingEdges, de1, e1, e2, e3, b1, FaceIndex(i))
-		v.connectToExistingVoronoi(d, outgoingEdges, de2, e2, e3, e1, b2, FaceIndex(i))
-		v.connectToExistingVoronoi(d, outgoingEdges, de3, e3, e1, e2, b3, FaceIndex(i))
+		v.connectToExistingVoronoi(d, outgoingEdges, de1, e1, e2, e3, b1, *HEFace(i))
+		v.connectToExistingVoronoi(d, outgoingEdges, de2, e2, e3, e1, b2, *HEFace(i))
+		v.connectToExistingVoronoi(d, outgoingEdges, de3, e3, e1, e2, b3, *HEFace(i))
 
-		if FaceIndex(d.Edges[de2].VOrigin) == 563313 && e1 == 3377004 {
+		if *HEFace(d.Edges[de2].VOrigin) == 563313 && e1 == 3377004 {
 			fmt.Printf("error1: %v\n", v.Edges[e1])
 		}
 
@@ -1255,3 +1258,4 @@ func (d *Delaunay) CreateVoronoi() Voronoi {
 
 	return realV
 }
+*/
