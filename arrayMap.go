@@ -126,6 +126,10 @@ func (t *ArrayMap) FindGreaterOrEqual(key float64) *List {
 		return nil
 	}
 
+	if key > 2*math.Pi {
+		key = 2*math.Pi - EPS
+	}
+
 	//fmt.Printf("    find %.3f\n", key)
 
 	i := int(key * 0.159154943 * float64(len(t.lookup)))

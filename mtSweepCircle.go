@@ -787,7 +787,6 @@ func extendByPoint(p DelaunayPoint, d *Delaunay, center Vector) {
 		frontierItem.Value.EdgeIndex = ej2
 
 		d.frontier.InsertAfter(FrontElement{ei2, p.PolarAngle, p.Distance}, frontierItem.Prev)
-
 	}
 
 	// There must exist a triangle behind the previous d.frontier edge. So this should be save.
@@ -842,43 +841,31 @@ func (d *Delaunay) triangulatePoints(pl *DelaunayPointList) {
 		lastP = p
 	}
 
-	// Finalization step so we have a valid convex hull afterwards!
-	f := d.frontier.GetLargestNode()
-	fV := f.Value
+	f := d.frontier.GetSmallestNode()
+	lastV := f.Value.PolarAngle
+	first := true
 
-	prev := f.Prev
-	prevV := prev.Value
+	for first || f.Value.PolarAngle > (lastV+EPS) {
+		lastV = f.Value.PolarAngle
 
-	frontierVertex := d.Edges[prevV.EdgeIndex].VOrigin
-	d.createConsecutiveTrianglesRight(frontierVertex, f, DegToRad(180))
+		d.createConsecutiveTrianglesLeft(d.Edges[f.Value.EdgeIndex].VOrigin, f, DegToRad(180)-EPS)
 
-	for fV.PolarAngle >= prevV.PolarAngle {
-
-		f = prev
-		fV = prevV
-		prev = f.Prev
-		prevV = prev.Value
-
-		frontierVertex = d.Edges[prevV.EdgeIndex].VOrigin
-		d.createConsecutiveTrianglesRight(frontierVertex, f, DegToRad(180))
+		f = d.frontier.FindGreaterOrEqual(lastV + EPS)
+		first = false
 	}
 
-	// Just to fill the gap from the last to the first vertex.
-	// TODO: This could be make more general by changing the condition of the loop.
-	// but the first attempts didn't quite work so I'll leave it here for the moment.
-	f = prev
-	fV = prevV
-	prev = f.Prev
-	prevV = prev.Value
-	frontierVertex = d.Edges[prevV.EdgeIndex].VOrigin
-	d.createConsecutiveTrianglesRight(frontierVertex, f, DegToRad(180))
+	// Once again for the smallest node to close the one gap for the beginning/end of the frontier.
+	// I am not entirely sure why this isn't closed automatically though...
+	// Probably in case the initial smallestNode was overwritten and is not any more part of the frontier.
+	// Then, there would be exactly one missing triangle fill left to close that gap (?!)
+	f = d.frontier.FindGreaterOrEqual(lastV + EPS)
+	d.createConsecutiveTrianglesLeft(d.Edges[f.Value.EdgeIndex].VOrigin, f, DegToRad(180)-EPS)
 
 }
 
 func TriangulateMultithreaded(pointList []Vector, threadCount int) Delaunay {
 
 	if len(pointList) < 3 {
-		s := NewArrayMap(0)
 		return Delaunay{
 			Vertices:           []HEVertex{},
 			firstFreeVertexPos: 0,
@@ -886,7 +873,7 @@ func TriangulateMultithreaded(pointList []Vector, threadCount int) Delaunay {
 			firstFreeEdgePos:   0,
 			Faces:              []HEFace{},
 			firstFreeFacePos:   0,
-			frontier:           s,
+			frontier:           NewArrayMap(0),
 		}
 	}
 
@@ -986,7 +973,7 @@ func (d *Delaunay) ExtractConvexHull() ConvexHull {
 }
 
 // Expects an Inner edge! Not the outward facing one!
-func calcPerpendicularBisector(d *Delaunay, e EdgeIndex) Edge {
+func CalcPerpendicularBisector(d *Delaunay, e EdgeIndex) Edge {
 	p1 := d.Vertices[d.Edges[e].VOrigin].Pos
 	p2 := d.Vertices[d.Edges[d.Edges[e].ETwin].VOrigin].Pos
 
@@ -1004,7 +991,7 @@ func calcPerpendicularBisector(d *Delaunay, e EdgeIndex) Edge {
 
 // Thanks to Paul Draper at
 // http://stackoverflow.com/questions/20677795/find-the-point-of-intersecting-lines
-func calculateVertexPosition(e1, e2 Edge) Vector {
+func CalculateVertexPosition(e1, e2 Edge) Vector {
 	p12 := Add(e1.Pos, e1.Dir)
 	p22 := Add(e2.Pos, e2.Dir)
 
@@ -1196,11 +1183,11 @@ func (d *Delaunay) CreateVoronoi() Voronoi {
 		de1 := df.EEdge
 		de2 := d.Edges[de1].ENext
 		de3 := d.Edges[de2].ENext
-		b1 := calcPerpendicularBisector(d, de1)
-		b2 := calcPerpendicularBisector(d, de2)
-		b3 := calcPerpendicularBisector(d, de3)
+		b1 := CalcPerpendicularBisector(d, de1)
+		b2 := CalcPerpendicularBisector(d, de2)
+		b3 := CalcPerpendicularBisector(d, de3)
 
-		newVertexPos := calculateVertexPosition(b1, b2)
+		newVertexPos := CalculateVertexPosition(b1, b2)
 		newVertex := v.createVertex(newVertexPos)
 
 		// Create three outgoing voronoi edges perpendicular to the delaunay edges of the triangle
@@ -1208,18 +1195,6 @@ func (d *Delaunay) CreateVoronoi() Voronoi {
 		e1 := v.createEdge(newVertex, EmptyEdge, EmptyEdge, EmptyEdge, FaceIndex(d.Edges[de2].VOrigin), b1)
 		e2 := v.createEdge(newVertex, EmptyEdge, EmptyEdge, EmptyEdge, FaceIndex(d.Edges[de3].VOrigin), b2)
 		e3 := v.createEdge(newVertex, EmptyEdge, EmptyEdge, EmptyEdge, FaceIndex(d.Edges[de1].VOrigin), b3)
-
-		if FaceIndex(d.Edges[de2].VOrigin) == 563313 && e1 == 3377004 {
-			fmt.Printf("error1: %v\n", v.Edges[e1])
-		}
-
-		if FaceIndex(d.Edges[de3].VOrigin) == 563313 && e2 == 3377004 {
-			fmt.Printf("error2.\n")
-		}
-
-		if FaceIndex(d.Edges[de1].VOrigin) == 563313 && e3 == 3377004 {
-			fmt.Printf("error3.\n")
-		}
 
 		// Assign the edge reference for a face (if not already done!)
 		if v.Faces[d.Edges[de1].VOrigin].EEdge == EmptyEdge {
@@ -1235,10 +1210,6 @@ func (d *Delaunay) CreateVoronoi() Voronoi {
 		v.connectToExistingVoronoi(d, outgoingEdges, de1, e1, e2, e3, b1, FaceIndex(i))
 		v.connectToExistingVoronoi(d, outgoingEdges, de2, e2, e3, e1, b2, FaceIndex(i))
 		v.connectToExistingVoronoi(d, outgoingEdges, de3, e3, e1, e2, b3, FaceIndex(i))
-
-		if FaceIndex(d.Edges[de2].VOrigin) == 563313 && e1 == 3377004 {
-			fmt.Printf("error1: %v\n", v.Edges[e1])
-		}
 
 		// For fast lookup later
 		outgoingEdges[i][0] = e1
