@@ -129,6 +129,10 @@ func (d *Delaunay) pprint() {
 	fmt.Printf("\n")
 }
 
+func triangleArea(v1, v2, v3 Vector) float64 {
+	return math.Abs(((v2.X-v1.X)*(v3.Y-v1.Y) - (v3.X-v1.X)*(v2.Y-v1.Y)) * 0.5)
+}
+
 // Verifies that the Delaunay is not corrupted or has miscalculated edges/faces
 // or any other unvalid stuff.
 func (d *Delaunay) Verify() error {
@@ -192,6 +196,10 @@ func (d *Delaunay) Verify() error {
 			edgeCount := 0
 			e := d.Edges[startEdge].ENext
 
+			trianglePoints := make([]Vector, 0)
+
+			trianglePoints = append(trianglePoints, d.Vertices[d.Edges[e].VOrigin].Pos)
+
 			for e != EmptyEdge && e != startEdge {
 
 				if int(d.Edges[e].FFace) != i {
@@ -204,8 +212,41 @@ func (d *Delaunay) Verify() error {
 				if edgeCount > 3 {
 					return errors.New(fmt.Sprintf("Looping around the edges of the face %v: %v are more than 3", i, f))
 				}
+
+				trianglePoints = append(trianglePoints, d.Vertices[d.Edges[e].VOrigin].Pos)
 			}
 
+			if triangleArea(trianglePoints[0], trianglePoints[1], trianglePoints[2]) <= EPS {
+				//return errors.New(fmt.Sprintf("Triangle around face %v (%v): has zero area", i, f))
+			}
+
+			e1 := d.Edges[startEdge].ENext
+			e2 := d.Edges[e1].ENext
+
+			a := d.Vertices[d.Edges[startEdge].VOrigin].Pos
+			b := d.Vertices[d.Edges[e1].VOrigin].Pos
+			c := d.Vertices[d.Edges[e2].VOrigin].Pos
+
+			var v Vector
+
+			if d.Edges[startEdge].EPrev != EmptyEdge {
+				v = d.Vertices[d.Edges[d.Edges[startEdge].EPrev].VOrigin].Pos
+				if !triangleIsValid(a, b, c, v) {
+					return errors.New(fmt.Sprintf("Triangle of face %v is invalid (circle condition) with v opposite to bc", i))
+				}
+			}
+			if d.Edges[e1].EPrev != EmptyEdge {
+				v = d.Vertices[d.Edges[d.Edges[e1].EPrev].VOrigin].Pos
+				if !triangleIsValid(a, b, c, v) {
+					return errors.New(fmt.Sprintf("Triangle of face %v is invalid (circle condition) with v opposite to ca", i))
+				}
+			}
+			if d.Edges[e2].EPrev != EmptyEdge {
+				v = d.Vertices[d.Edges[d.Edges[e2].EPrev].VOrigin].Pos
+				if !triangleIsValid(a, b, c, v) {
+					return errors.New(fmt.Sprintf("Triangle of face %v is invalid (circle condition) with v opposite to ab", i))
+				}
+			}
 		}
 	}
 
@@ -452,7 +493,11 @@ func (d *Delaunay) initializeTriangulation(pl *DelaunayPointList) *ArrayMap {
 	// Pop first three points, because they are already triangulated by default
 	pl.Points = pl.Points[3:]
 
-	frontier := NewArrayMap(int(math.Sqrt(float64(len(pl.Points)))))
+	mapCount := int(math.Sqrt(float64(len(pl.Points))))
+	if mapCount < 3 {
+		mapCount = 3
+	}
+	frontier := NewArrayMap(mapCount)
 
 	n1 := frontier.InsertAfter(f0, nil)
 	n2 := frontier.InsertAfter(f1, n1)
@@ -1080,14 +1125,19 @@ func (v *Voronoi) Verify() error {
 			for e != EmptyEdge && e != startEdge {
 
 				if v.Edges[e].FFace != FaceIndex(i) {
-					return errors.New(fmt.Sprintf("Edge %v should point to face : %v  but points to: %v)", e, f, v.Edges[e].FFace))
+					//fmt.Println(".")
+					return errors.New(fmt.Sprintf("Edge %v should point to face : %v but points to: %v)", e, i, v.Edges[e].FFace))
 				}
 
 				e = v.Edges[e].ENext
 			}
 
+			if e == EmptyEdge && v.Edges[startEdge].EPrev != EmptyEdge {
+				return errors.New(fmt.Sprintf("Edge %v is wrongly assigned as first edge for face %v (border polygon, not closed!)", startEdge, i))
+			}
+
 			if e != startEdge && v.Edges[startEdge].EPrev != EmptyEdge {
-				return errors.New(fmt.Sprintf("Edge %v does not correctly loop around face %v (All around, it should point to edge: %v)", e, f, startEdge))
+				return errors.New(fmt.Sprintf("Edge %v does not correctly loop around face %v (All around, it should point to edge: %v)", e, i, startEdge))
 			}
 
 		}
@@ -1101,6 +1151,7 @@ func (v *Delaunay) connectToExistingVoronoi(d *Delaunay, outgoingEdges [][]EdgeI
 
 	// If there is no neighboring triangle/face, we are at the outer bounds
 	f1 := d.Edges[d.Edges[de1].ETwin].FFace
+
 	if f1 == EmptyFace {
 		// Again: Because we create all the Voronoi faces in a loop at the beginning with the Delaunay Vertices as reference (position),
 		// the Delaunay vertex ids correspond to the Voronoi face ids! So we can just use them where we know it fits.
@@ -1146,7 +1197,7 @@ func (v *Delaunay) connectToExistingVoronoi(d *Delaunay, outgoingEdges [][]EdgeI
 
 }
 
-func (d *Delaunay) CreateVoronoi() Voronoi {
+func (d *Delaunay) CreateVoronoi2() Voronoi {
 
 	// The data structure is identical. So we create this Delaunay struct and cast it to Voronoi on return.
 	// So we can use the corresponding methods.
@@ -1225,4 +1276,176 @@ func (d *Delaunay) CreateVoronoi() Voronoi {
 	realV.Faces = append([]HEFace{}, realV.Faces[:realV.firstFreeFacePos]...)
 
 	return realV
+}
+
+func (v *Delaunay) connectPrevEdge(d *Delaunay, vE, dE EdgeIndex) {
+
+	// We have already processed this edge. Meaning - they have origin vertices and can be connected.
+	//	if v.Edges[vE].VOrigin > VertexIndex(d.Edges[d.Edges[dE].ETwin].FFace) {
+
+	out := dE
+	in := d.Edges[dE].ETwin
+	if v.Edges[in].VOrigin == v.Edges[vE].VOrigin {
+		// Swap the edges, they are the other way round
+		out, in = in, out
+	}
+	v.Edges[vE].EPrev = in
+	v.Edges[in].ENext = vE
+	//	}
+
+}
+
+func (v *Delaunay) connectNextEdge(d *Delaunay, vE, dE EdgeIndex) {
+
+	//	if v.Edges[v.Edges[vE].ETwin].VOrigin > VertexIndex(d.Edges[d.Edges[dE].ETwin].FFace) {
+	out := dE
+	in := d.Edges[dE].ETwin
+	if v.Edges[in].VOrigin == v.Edges[v.Edges[vE].ETwin].VOrigin {
+		out, in = in, out
+	}
+	v.Edges[vE].ENext = out
+	v.Edges[out].EPrev = vE
+	//	}
+
+}
+
+// connectNewVertex takes a vertex ID and connects it with another Voronoi vertex from a neighbor delaunay triangle (to the side of dEdge).
+func (v *Delaunay) connectNewVertex(d *Delaunay, dEdge EdgeIndex, dFace FaceIndex) {
+	neighborFace := d.Edges[d.Edges[dEdge].ETwin].FFace
+
+	if neighborFace != EmptyFace {
+		// This means, that we have not yet connected the two voronoi vertices with each other.
+		if dFace < neighborFace {
+			dir1 := Sub(v.Vertices[neighborFace].Pos, v.Vertices[dFace].Pos)
+			dir2 := Mult(dir1, -1)
+
+			// Get the two edges I can work with here. Both have (right now) no defining attributes. So I can just connect them anyhow.
+			vE1 := dEdge
+			vE2 := d.Edges[dEdge].ETwin
+
+			// outgoing edge
+			v.Edges[vE1].FFace = FaceIndex(d.Edges[d.Edges[dEdge].ETwin].VOrigin)
+			//fmt.Printf("3: e %v --> f %v\n", vE1, d.Edges[d.Edges[dEdge].ETwin].VOrigin)
+			v.Edges[vE1].VOrigin = VertexIndex(dFace)
+			v.Edges[vE1].TmpEdge = Edge{v.Vertices[dFace].Pos, dir1}
+			// incoming edge
+			v.Edges[vE2].FFace = FaceIndex(d.Edges[dEdge].VOrigin)
+			//fmt.Printf("4: e %v --> f %v\n", vE2, d.Edges[dEdge].VOrigin)
+			v.Edges[vE2].VOrigin = VertexIndex(neighborFace)
+			v.Edges[vE2].TmpEdge = Edge{v.Vertices[neighborFace].Pos, dir2}
+
+			// Do we already have a previous double edge for vE1?
+			v.connectPrevEdge(d, vE1, d.Edges[dEdge].ENext)
+			v.connectPrevEdge(d, vE2, d.Edges[d.Edges[dEdge].ETwin].ENext)
+
+			v.connectNextEdge(d, vE1, d.Edges[d.Edges[dEdge].ETwin].EPrev)
+			v.connectNextEdge(d, vE2, d.Edges[dEdge].EPrev)
+
+			//			fmt.Printf("1 connect edge %v\n", vE1)
+			//			fmt.Printf("2 connect edge %v\n", vE2)
+
+			// Just set it once with just any edge. If it is on the convex hull, it will be overwritten anyway.
+			if v.Faces[d.Edges[dEdge].VOrigin].EEdge == EmptyEdge {
+				v.Faces[d.Edges[dEdge].VOrigin].EEdge = vE2
+			}
+			if v.Faces[d.Edges[d.Edges[dEdge].ETwin].VOrigin].EEdge == EmptyEdge {
+				v.Faces[d.Edges[d.Edges[dEdge].ETwin].VOrigin].EEdge = vE1
+			}
+
+		}
+	} else {
+		// This means, that we are at the edge and need to create an infinite edge.
+
+		dir1 := Perpendicular(d.Edges[dEdge].TmpEdge.Dir)
+		dir2 := Mult(dir1, -1)
+
+		vE1 := dEdge
+		vE2 := d.Edges[dEdge].ETwin
+
+		v.Edges[vE1].FFace = FaceIndex(d.Edges[d.Edges[dEdge].ETwin].VOrigin)
+		//fmt.Printf("1: e %v --> f %v\n", vE1, d.Edges[d.Edges[dEdge].ETwin].VOrigin)
+		v.Edges[vE1].TmpEdge = Edge{v.Vertices[dFace].Pos, dir1}
+
+		v.Edges[vE2].FFace = FaceIndex(d.Edges[dEdge].VOrigin)
+		//fmt.Printf("2: e %v --> f %v\n", vE2, d.Edges[dEdge].VOrigin)
+		// The pos is wrong here because it is outside the Voronoi/Delaunay.
+		v.Edges[vE2].TmpEdge = Edge{Add(v.Vertices[dFace].Pos, dir1), dir2}
+
+		// Per definition a first-edge!
+		v.Faces[d.Edges[dEdge].VOrigin].EEdge = vE2
+		//fmt.Printf("3: f %v --> e %v\n", d.Edges[dEdge].VOrigin, vE2)
+	}
+
+}
+
+func (d *Delaunay) CreateVoronoi() Voronoi {
+
+	// The data structure is identical. So we create this Delaunay struct and cast it to Voronoi on return.
+	// So we can use the corresponding methods.
+	v := Delaunay{
+		Vertices:           make([]HEVertex, len(d.Faces)),
+		firstFreeVertexPos: 0,
+		Edges:              make([]HEEdge, len(d.Edges)),
+		firstFreeEdgePos:   0,
+		Faces:              make([]HEFace, len(d.Vertices)),
+		firstFreeFacePos:   0,
+	}
+
+	// Create all Voronoi faces beforehand at the position of the Delaunay vertex. The connection to the edges will be added later.
+	// The index of the Voronoi faces will correspond to the index Delaunay vertices.
+	for _, dv := range d.Vertices {
+		v.createFace(dv.Pos, EmptyEdge)
+	}
+
+	// Also, for every Delaunay face exist exactly one Voronoi vertex.
+	// They now also correspond to each other! D_FaceIndex == V_VertexIndex
+	for _, df := range d.Faces {
+
+		de1 := df.EEdge
+		de2 := d.Edges[de1].ENext
+
+		b1 := CalcPerpendicularBisector(d, de1)
+		b2 := CalcPerpendicularBisector(d, de2)
+
+		empty := Vector{}
+		newVertexPos := CalculateVertexPosition(b1, b2)
+		if newVertexPos == empty {
+			de3 := d.Edges[de2].ENext
+			b3 := CalcPerpendicularBisector(d, de3)
+			newVertexPos = CalculateVertexPosition(b1, b3)
+			if newVertexPos == empty {
+				fmt.Printf("All three bisectors are parallel. Is that even possible?\n")
+				newVertexPos = d.Vertices[d.Edges[de1].VOrigin].Pos
+			}
+		}
+		v.createVertex(newVertexPos)
+	}
+
+	// There are also EXACT as many Voronoi edges as Delaunay edges.
+	// Each Voronoi edge (pair) corresponds exactly to a Delaunay edges pair.
+	// So to find an existing Voronoi edge pair, take the even number of the Delaunay edge (edge%2 == 1 ? edge -1 : edge) and directly use it!
+	for i := 0; i < len(d.Edges); i += 2 {
+		var tmpEdge Edge
+		e1 := v.createEdge(EmptyVertex, EmptyEdge, EmptyEdge, EmptyEdge, EmptyFace, tmpEdge)
+		e2 := v.createEdge(EmptyVertex, e1, EmptyEdge, EmptyEdge, EmptyFace, tmpEdge)
+		v.Edges[e1].ETwin = e2
+	}
+
+	// Iterate over all Delaunay Faces. All Delaunay triangles have exactly three edges!
+	for i, df := range d.Faces {
+
+		de1 := df.EEdge
+		de2 := d.Edges[de1].ENext
+		de3 := d.Edges[de2].ENext
+
+		// All three directions of the triangle we are iterating.
+		v.connectNewVertex(d, de1, FaceIndex(i))
+		v.connectNewVertex(d, de2, FaceIndex(i))
+		v.connectNewVertex(d, de3, FaceIndex(i))
+	}
+
+	//fmt.Println(v)
+
+	return Voronoi(v)
+
 }
