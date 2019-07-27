@@ -156,7 +156,7 @@ func (t *ArrayMap) FindGreaterOrEqual(key float64) *List {
 	//fmt.Printf("    initial: %.3f\n", n.Value.PolarAngle)
 
 	// Default.
-	if n.Prev.Value.PolarAngle < key && n.Value.PolarAngle > key {
+	if n.Prev.Value.PolarAngle < key && n.Value.PolarAngle >= key {
 		return n
 	}
 
